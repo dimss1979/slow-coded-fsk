@@ -44,6 +44,7 @@ static float carrier_freq;
 static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
 static complex float shifter_wavetable[CHIP_FREQS][SCF_BB_CHIP_LEN];
+static float fft_window[SCF_BB_CHIP_LEN];
 static uint8_t rx_preamble[SCF_PREAMBLE];
 static size_t rx_bin;
 static size_t mfsk_idx;
@@ -107,6 +108,7 @@ static void update_mfsk_history(struct rx_worker *w, struct rx_chain *c, size_t 
 {
     for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
         w->sa_fft_buf[i] = w->source[i] * shifter_wavetable[freq_i][i];
+        w->sa_fft_buf[i] *= fft_window[i];
     }
 
     fftwf_execute_dft(sa_fft, w->sa_fft_buf, w->sa_fft_buf);
@@ -286,6 +288,13 @@ static void shifter_wavetable_init(void)
     }
 }
 
+static void fft_window_init(void)
+{
+    for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
+        fft_window[i] = sin(M_PI * i / SCF_BB_CHIP_LEN);
+    }
+}
+
 void scf_rx_init(float freq, uint8_t *preamble)
 {
     carrier_freq = freq;
@@ -317,6 +326,7 @@ void scf_rx_init(float freq, uint8_t *preamble)
         outer_idx = 0;
         chip_cnt = SCF_CHIPS;
         shifter_wavetable_init();
+        fft_window_init();
     }
 }
 
