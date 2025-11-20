@@ -7,7 +7,7 @@
 #include "scf_filter.h"
 #include "scf_tx.h"
 
-#define MOD_FILTER_LEN 8
+#define MOD_FILTER_LEN (SCF_BB_CHIP_LEN / 10)
 
 static complex float fir_tail[SCF_FIR_LEN_RF];
 static float carrier_freq;
@@ -16,16 +16,7 @@ static float bb_phase;
 static const float freq_step = (float) SCF_SRATE / SCF_CHIP_LEN;
 
 static float mod_filter_buf[MOD_FILTER_LEN];
-static const float mod_filter_kernel[MOD_FILTER_LEN] = {
-    0.012564432734645786,
-    0.058060308288456049,
-    0.161078275758929301,
-    0.268296983217968910,
-    0.268296983217968910,
-    0.161078275758929301,
-    0.058060308288456049,
-    0.012564432734645786,
-};
+static float mod_filter_kernel[MOD_FILTER_LEN];
 static size_t mod_filter_idx;
 
 static float mod_filter(float x)
@@ -42,9 +33,24 @@ static float mod_filter(float x)
     return y;
 }
 
+void mod_filter_init(void)
+{
+    float dc_gain = 0.0f;
+
+    for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
+        mod_filter_kernel[i] = sin(M_PI * i / MOD_FILTER_LEN);
+        dc_gain += mod_filter_kernel[i];
+    }
+
+    for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
+        mod_filter_kernel[i] /= dc_gain;
+    }
+}
+
 void scf_tx_init(float freq)
 {
     scf_filter_init();
+    mod_filter_init();
 
     carrier_freq = freq;
 }
