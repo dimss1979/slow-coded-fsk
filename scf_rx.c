@@ -12,15 +12,16 @@
 #include "scf_rx.h"
 
 #define CHIP_PHASES 8
-#define CHIP_FREQS 4
-#define FREQ_STEP_PER_BIN 4
+#define FFT_RATIO 4
+#define FFT_LEN (SCF_BB_CHIP_LEN * FFT_RATIO)
 #define CW_FILTER_LEN 13
 
 #define TRACK_LEN (9)
 
 struct rx_chain {
-    float cw_filter_buf[SCF_BB_CHIP_LEN][CW_FILTER_LEN];
-    int8_t mfsk_history[SCF_BB_CHIP_LEN][SCF_CHIPS * SCF_PREAMBLE][SCF_FREQS];
+    complex float *source;
+    float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
+    int8_t mfsk_history[FFT_LEN][SCF_CHIPS * SCF_PREAMBLE][SCF_FREQS];
     int32_t preamble_weight;
     size_t preamble_bin;
     int32_t weight_history[TRACK_LEN][SCF_CHIPS];
@@ -30,20 +31,13 @@ struct rx_chain {
     size_t decoded_phase;
 };
 
-struct rx_worker {
-    complex float *source;
-    fftwf_complex *sa_fft_buf;
-    struct rx_chain rx_chains[CHIP_FREQS];
-    struct scf_soft_symbol *decoded_symbol;
-};
-
-static struct rx_worker *rx_workers;
-static fftwf_plan sa_fft;
+struct rx_chain rx_chain[CHIP_PHASES];
+static fftwf_plan fft_plan;
+fftwf_complex *fft_buf;
 static complex float input_chips[SCF_BB_CHIP_LEN * 2];
 static float carrier_freq;
 static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
-static complex float shifter_wavetable[CHIP_FREQS][SCF_BB_CHIP_LEN];
 static float fft_window[SCF_BB_CHIP_LEN];
 static uint8_t rx_preamble[SCF_PREAMBLE];
 static size_t rx_bin;
@@ -68,6 +62,8 @@ static const float cw_filter_kernel[CW_FILTER_LEN] = {
     -0.067400917530924781,
     -0.058941394880239056,
 };
+
+bool initialized;
 
 static float cw_filter(float *cw_filter_buf, float x)
 {
@@ -104,43 +100,47 @@ static void shift_input_chips(float *chip)
     }
 }
 
-static void update_mfsk_history(struct rx_worker *w, struct rx_chain *c, size_t freq_i)
+static void update_mfsk_history(struct rx_chain *c)
 {
-    for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
-        w->sa_fft_buf[i] = w->source[i] * shifter_wavetable[freq_i][i];
-        w->sa_fft_buf[i] *= fft_window[i];
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        if (i < SCF_BB_CHIP_LEN) {
+            fft_buf[i] = c->source[i];
+            fft_buf[i] *= fft_window[i];
+        } else {
+            fft_buf[i] = 0.0f;
+        }
     }
 
-    fftwf_execute_dft(sa_fft, w->sa_fft_buf, w->sa_fft_buf);
+    fftwf_execute_dft(fft_plan, fft_buf, fft_buf);
 
-    float filtered_power[SCF_BB_CHIP_LEN];
+    float filtered_power[FFT_LEN];
 
-    for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
-        complex float bin = w->sa_fft_buf[i];
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        complex float bin = fft_buf[i];
         float power = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
         filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], power);
     }
 
-    for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
+    for (size_t i = 0; i < FFT_LEN; i++) {
         float filtered_power_sum = 0.0f;
 
         for (size_t j = 0; j < SCF_FREQS; j++) {
-            size_t f = (i + j) % SCF_BB_CHIP_LEN;
+            size_t f = (i + j * FFT_RATIO) % FFT_LEN;
             filtered_power_sum += fabs(filtered_power[f]);
         }
         for (size_t j = 0; j < SCF_FREQS; j++) {
-            size_t f = (i + j) % SCF_BB_CHIP_LEN;
+            size_t f = (i + j * FFT_RATIO) % FFT_LEN;
             c->mfsk_history[i][mfsk_idx][j] = 127.0f * filtered_power[f] / filtered_power_sum;
         }
     }
 }
 
-static void update_preamble(struct rx_chain *c)
+static void find_preamble(struct rx_chain *c)
 {
     int32_t max_weight = INT32_MIN;
     size_t max_bin = 0;
 
-    for (size_t b = 0; b < SCF_BB_CHIP_LEN; b++) {
+    for (size_t b = 0; b < FFT_LEN; b++) {
         int32_t weight = 0;
         size_t preamble_pos = mfsk_idx;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
@@ -248,46 +248,6 @@ static void find_peak_symbol(struct rx_chain *c)
     c->decoded_phase = phase;
 }
 
-static void rx_worker_preamble(struct rx_worker *w)
-{
-    for (size_t i = 0; i < CHIP_FREQS; i++) {
-        struct rx_chain *c = &w->rx_chains[i];
-        update_mfsk_history(w, c, i);
-        update_preamble(c);
-    }
-}
-
-static void rx_worker_data(struct rx_worker *w)
-{
-    for (size_t i = 0; i < CHIP_FREQS; i++) {
-        struct rx_chain *c = &w->rx_chains[i];
-        decode_current_symbol(c);
-        if (chip_cnt == 1) {
-            find_peak_symbol(c);
-        }
-    }
-}
-
-static void shifter_wavetable_init(void)
-{
-    float freq_step = 1.0f / ((float) FREQ_STEP_PER_BIN * SCF_CHIP_LEN / SCF_SRATE);
-
-    for (int freq_i = 0; freq_i < CHIP_FREQS; freq_i++) {
-        float shift_freq = freq_step * (freq_i - CHIP_FREQS / 2);
-        float shift_phase = 0.0f;
-        for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
-            shifter_wavetable[freq_i][i] = sinf(shift_phase) + cosf(shift_phase) * I;
-            shift_phase += 2.0f * M_PI * shift_freq * (1.0f / SCF_BB_SRATE);
-            while (shift_phase > 2.0f * M_PI) {
-                shift_phase -= 2.0f * M_PI;
-            }
-            while (shift_phase < -2.0f * M_PI) {
-                shift_phase += 2.0f * M_PI;
-            }
-        }
-    }
-}
-
 static void fft_window_init(void)
 {
     for (size_t i = 0; i < SCF_BB_CHIP_LEN; i++) {
@@ -300,33 +260,30 @@ void scf_rx_init(float freq, uint8_t *preamble)
     carrier_freq = freq;
     memcpy(rx_preamble, preamble, SCF_PREAMBLE);
 
-    if (!rx_workers) {
-        rx_workers = calloc(CHIP_PHASES, sizeof(*rx_workers));
-        assert(rx_workers);
-
+    if (!initialized) {
         for (size_t i = 0; i < CHIP_PHASES; i++) {
-            struct rx_worker *w = &rx_workers[i];
-
-            w->source = &input_chips[SCF_BB_CHIP_LEN - i * SCF_BB_CHIP_LEN / CHIP_PHASES];
-            w->sa_fft_buf = fftwf_alloc_complex(SCF_BB_CHIP_LEN);
-            assert(w->sa_fft_buf);
+            rx_chain[i].source = &input_chips[SCF_BB_CHIP_LEN - i * SCF_BB_CHIP_LEN / CHIP_PHASES];
         }
 
-        sa_fft = fftwf_plan_dft_1d(
-            SCF_BB_CHIP_LEN,
-            rx_workers[0].sa_fft_buf,
-            rx_workers[0].sa_fft_buf,
+        fft_buf = fftwf_alloc_complex(FFT_LEN);
+        assert(fft_buf);
+
+        fft_plan = fftwf_plan_dft_1d(
+            FFT_LEN,
+            fft_buf,
+            fft_buf,
             FFTW_FORWARD,
             FFTW_ESTIMATE
         );
-        assert(sa_fft);
+        assert(fft_plan);
 
         mfsk_idx = 0;
         inner_idx = 0;
         outer_idx = 0;
         chip_cnt = SCF_CHIPS;
-        shifter_wavetable_init();
         fft_window_init();
+
+        initialized = true;
     }
 }
 
@@ -335,29 +292,28 @@ bool scf_rx_chip(struct scf_soft_symbol *symbol, float *chip)
     shift_input_chips(chip);
 
     for (size_t i = 0; i < CHIP_PHASES; i++) {
-        struct rx_worker *w = &rx_workers[i];
-        rx_worker_preamble(w);
+        update_mfsk_history(&rx_chain[i]);
+        find_preamble(&rx_chain[i]);
     }
 
     int32_t max_preamble_weight = INT32_MIN;
     struct rx_chain *preamble_chain = NULL;
 
     for (size_t i = 0; i < CHIP_PHASES; i++) {
-        struct rx_worker *w = &rx_workers[i];
-        for (size_t i = 0; i < CHIP_FREQS; i++) {
-            struct rx_chain *c = &w->rx_chains[i];
-            if (c->preamble_weight > max_preamble_weight) {
-                max_preamble_weight = c->preamble_weight;
-                preamble_chain = c;
-            }
+        struct rx_chain *c = &rx_chain[i];
+        if (c->preamble_weight > max_preamble_weight) {
+            max_preamble_weight = c->preamble_weight;
+            preamble_chain = c;
         }
     }
 
     decode_preamble(preamble_chain);
 
     for (size_t i = 0; i < CHIP_PHASES; i++) {
-        struct rx_worker *w = &rx_workers[i];
-        rx_worker_data(w);
+        decode_current_symbol(&rx_chain[i]);
+        if (chip_cnt == 1) {
+            find_peak_symbol(&rx_chain[i]);
+        }
     }
 
     mfsk_idx = (mfsk_idx + 1) % (SCF_CHIPS * SCF_PREAMBLE);
@@ -373,14 +329,11 @@ bool scf_rx_chip(struct scf_soft_symbol *symbol, float *chip)
         size_t best_phase = 0;
 
         for (size_t i = 0; i < CHIP_PHASES; i++) {
-            struct rx_worker *w = &rx_workers[i];
-            for (size_t i = 0; i < CHIP_FREQS; i++) {
-                struct rx_chain *c = &w->rx_chains[i];
-                if (c->decoded_phase_weight > max_phase_weight) {
-                    max_phase_weight = c->decoded_phase_weight;
-                    *symbol = c->decoded_symbol;
-                    best_phase = c->decoded_phase;
-                }
+            struct rx_chain *c = &rx_chain[i];
+            if (c->decoded_phase_weight > max_phase_weight) {
+                max_phase_weight = c->decoded_phase_weight;
+                *symbol = c->decoded_symbol;
+                best_phase = c->decoded_phase;
             }
         }
 
