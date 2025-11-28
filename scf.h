@@ -2,6 +2,7 @@
 #define __SCF_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define SCF_SYMBOL_M 256 /* fixed for 8 bits per symbol */
 #define SCF_CHIPS 8 /* chips per symbol */
@@ -15,11 +16,12 @@
 #define SCF_BB_SRATE (SCF_SRATE / SCF_DEC_RATIO)
 #define SCF_BB_CHIP_LEN (SCF_CHIP_LEN / SCF_DEC_RATIO)
 #define SCF_FREQS (16)
-#define CRC_LEN 3
 
 struct scf_soft_symbol {
     int32_t weight;
     uint8_t symbol;
 };
+
+typedef bool (*scf_msg_verifier)(uint8_t*, size_t);
 
 #endif

@@ -20,7 +20,8 @@
 #include "scf_packet.h"
 
 #define MSG_LEN 100 /* bytes */
-#define PKT_LEN 123 /* bytes */
+#define PKT_LEN 120 /* bytes */
+#define CRC_LEN 3 /* bytes */
 
 #define START_OFFSET 2
 #define RX_SIGNAL_LEN ((START_OFFSET + 1 + SCF_PREAMBLE + PKT_LEN + 6) * SCF_SYMBOL_LEN) /* samples */
@@ -60,11 +61,33 @@ void dump_signal(char *filename, float *signal, size_t len)
     close(f);
 }
 
+static uint32_t crc24(uint8_t *input, size_t len)
+{
+    uint32_t crc = 0xB704CE;
+    while (len--) {
+        crc ^= (*input++) << 16;
+        for (size_t i = 0; i < 8; i++) {
+            crc <<= 1;
+            if (crc & 0x1000000) {
+                crc &= 0XFFFFFF;
+                crc ^= 0x864CFB;
+            }
+        }
+    }
+    return crc & 0xFFFFFF;
+}
+
 void generate_message(uint8_t *msg)
 {
     for (size_t i = 0; i < MSG_LEN; i++) {
         msg[i] = gsl_rng_get(rng) % SCF_SYMBOL_M;
     }
+
+    uint32_t crc = crc24(msg, MSG_LEN - CRC_LEN);
+
+    msg[MSG_LEN - 3] = crc >> 16;
+    msg[MSG_LEN - 2] = crc >> 8;
+    msg[MSG_LEN - 1] = crc;
 }
 
 void add_awgn(float *out, size_t len, float sigma)
@@ -103,6 +126,20 @@ float measure_power(float *signal, size_t len)
     }
 
     return energy / (double) len;
+}
+
+static bool msg_verifier(uint8_t *msg, size_t msg_len)
+{
+    if (msg_len < CRC_LEN + 1)
+        return false;
+
+    uint32_t crc = crc24(msg, msg_len - CRC_LEN);
+    uint32_t received_crc = (msg[msg_len - 3] << 16) | (msg[msg_len - 2] << 8) | msg[msg_len - 1];
+
+    if (crc == received_crc)
+        return true;
+    else
+        return false;
 }
 
 bool run_test(void)
@@ -189,19 +226,13 @@ bool run_test(void)
         i < RX_SIGNAL_LEN - SCF_CHIP_LEN + 1;
         i += SCF_CHIP_LEN
     ) {
-        struct scf_soft_symbol symbol;
-        bool have_decode = scf_rx_chip(&symbol, &rx_signal[i]);
-        if (have_decode) {
-            symbol_count++;
-
-            size_t received_message_len = scf_outer_decode(rx_message, symbol);
-            if (received_message_len) {
-                printf("Decoded PSDU %li bytes\n", received_message_len);
-                assert(received_message_len == MSG_LEN);
-                assert(!memcmp(tx_message, rx_message, MSG_LEN));
-                message_is_decoded = true;
-                break;
-            }
+        size_t received_message_len = scf_rx_chip(rx_message, &rx_signal[i], msg_verifier);
+        if (received_message_len) {
+            printf("Decoded PSDU %li bytes\n", received_message_len);
+            assert(received_message_len == MSG_LEN);
+            assert(!memcmp(tx_message, rx_message, MSG_LEN));
+            message_is_decoded = true;
+            break;
         }
     }
 

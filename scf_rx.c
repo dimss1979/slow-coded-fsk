@@ -8,6 +8,7 @@
 
 #include "scf.h"
 #include "scf_inner.h"
+#include "scf_outer.h"
 #include "scf_filter.h"
 #include "scf_rx.h"
 
@@ -45,6 +46,9 @@ static size_t mfsk_idx;
 static size_t inner_idx;
 static size_t outer_idx;
 static size_t chip_cnt;
+static bool in_packet;
+static size_t symbol_idx;
+static struct scf_soft_symbol symbol_buf[SCF_SYMBOL_M - 1];
 
 static size_t cw_filter_idx;
 static const float cw_filter_kernel[CW_FILTER_LEN] = {
@@ -193,6 +197,8 @@ static void decode_preamble(struct rx_chain *c)
     if (correct >= SCF_PREAMBLE_REQUIRED) {
         rx_bin = c->preamble_bin;
         chip_cnt = SCF_CHIPS * 3 / 2;
+        in_packet = true;
+        symbol_idx = 0;
 
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             size_t history_pos = (outer_idx - SCF_PREAMBLE + 1 + i + TRACK_LEN) % TRACK_LEN;
@@ -259,6 +265,9 @@ void scf_rx_init(float freq, uint8_t *preamble)
 {
     carrier_freq = freq;
     memcpy(rx_preamble, preamble, SCF_PREAMBLE);
+    in_packet = true;
+    symbol_idx = 0;
+
 
     if (!initialized) {
         for (size_t i = 0; i < CHIP_PHASES; i++) {
@@ -287,7 +296,7 @@ void scf_rx_init(float freq, uint8_t *preamble)
     }
 }
 
-bool scf_rx_chip(struct scf_soft_symbol *symbol, float *chip)
+size_t scf_rx_chip(uint8_t *msg, float *chip, scf_msg_verifier verifier)
 {
     shift_input_chips(chip);
 
@@ -325,27 +334,45 @@ bool scf_rx_chip(struct scf_soft_symbol *symbol, float *chip)
     chip_cnt--;
 
     if (!chip_cnt) {
-        int32_t max_phase_weight = 0;
-        size_t best_phase = 0;
+        chip_cnt = SCF_CHIPS;
 
-        for (size_t i = 0; i < CHIP_PHASES; i++) {
-            struct rx_chain *c = &rx_chain[i];
-            if (c->decoded_phase_weight > max_phase_weight) {
-                max_phase_weight = c->decoded_phase_weight;
-                *symbol = c->decoded_symbol;
-                best_phase = c->decoded_phase;
+        if (in_packet) {
+            int32_t max_phase_weight = 0;
+            size_t best_phase = 0;
+            struct scf_soft_symbol symbol;
+
+            for (size_t i = 0; i < CHIP_PHASES; i++) {
+                struct rx_chain *c = &rx_chain[i];
+                if (c->decoded_phase_weight > max_phase_weight) {
+                    max_phase_weight = c->decoded_phase_weight;
+                    symbol = c->decoded_symbol;
+                    best_phase = c->decoded_phase;
+                }
+            }
+
+            if (best_phase < SCF_CHIPS / 2) {
+                chip_cnt = SCF_CHIPS + 1;
+            } else if (best_phase > SCF_CHIPS / 2) {
+                chip_cnt = SCF_CHIPS - 1;
+            }
+
+            symbol_buf[symbol_idx] = symbol;
+
+            size_t msg_len = scf_outer_decode(msg, symbol_buf, symbol_idx + 1, verifier);
+            if (msg_len) {
+                symbol_idx = 0;
+                in_packet = false;
+                return msg_len;
+            }
+
+            if (symbol_idx == SCF_SYMBOL_M - 1) {
+                symbol_idx = 0;
+                in_packet = false;
+            } else {
+                symbol_idx++;
             }
         }
-
-        if (best_phase < SCF_CHIPS / 2) {
-            chip_cnt = SCF_CHIPS + 1;
-        } else if (best_phase > SCF_CHIPS / 2) {
-            chip_cnt = SCF_CHIPS - 1;
-        } else {
-            chip_cnt = SCF_CHIPS;
-        }
-        return true;
-    } else {
-        return false;
     }
+
+    return 0;
 }
