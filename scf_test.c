@@ -151,6 +151,7 @@ bool run_test(void)
     float other_user_level = 0.00001f;
 
     getrandom(preamble, SCF_PREAMBLE, 0);
+    scf_inner_generate(gsl_rng_get(rng));
     generate_message(tx_message);
     assert(scf_outer_encode(tx_packet, tx_message, MSG_LEN) == PKT_LEN);
 
@@ -171,6 +172,7 @@ bool run_test(void)
     // TX
 
     getrandom(preamble, SCF_PREAMBLE, 0);
+    scf_inner_generate(gsl_rng_get(rng));
     generate_message(tx_message);
     assert(scf_outer_encode(tx_packet, tx_message, MSG_LEN) == PKT_LEN);
 
@@ -258,7 +260,6 @@ int main(int argc, char **argv)
         exit(1);
     }
     gsl_rng_set(rng, time(NULL));
-    scf_inner_generate();
     scf_packet_init();
 
     unsigned int decoded_message_cnt = 0;

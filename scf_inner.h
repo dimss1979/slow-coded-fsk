@@ -5,6 +5,6 @@
 
 extern int scf_inner_code[SCF_SYMBOL_M][SCF_CHIPS];
 
-void scf_inner_generate(void);
+void scf_inner_generate(uint32_t seed);
 
 #endif
