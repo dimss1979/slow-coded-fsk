@@ -265,7 +265,7 @@ void scf_rx_init(float freq, uint8_t *preamble)
 {
     carrier_freq = freq;
     memcpy(rx_preamble, preamble, SCF_PREAMBLE);
-    in_packet = true;
+    in_packet = false;
     symbol_idx = 0;
 
 
@@ -298,6 +298,8 @@ void scf_rx_init(float freq, uint8_t *preamble)
 
 size_t scf_rx_chip(uint8_t *msg, float *chip, scf_msg_verifier verifier)
 {
+    size_t msg_len = 0;
+
     shift_input_chips(chip);
 
     for (size_t i = 0; i < CHIP_PHASES; i++) {
@@ -358,14 +360,8 @@ size_t scf_rx_chip(uint8_t *msg, float *chip, scf_msg_verifier verifier)
 
             symbol_buf[symbol_idx] = symbol;
 
-            size_t msg_len = scf_outer_decode(msg, symbol_buf, symbol_idx + 1, verifier);
-            if (msg_len) {
-                symbol_idx = 0;
-                in_packet = false;
-                return msg_len;
-            }
-
-            if (symbol_idx == SCF_SYMBOL_M - 1) {
+            msg_len = scf_outer_decode(msg, symbol_buf, symbol_idx + 1, verifier);
+            if (msg_len && symbol_idx == SCF_SYMBOL_M - 1) {
                 symbol_idx = 0;
                 in_packet = false;
             } else {
@@ -374,5 +370,5 @@ size_t scf_rx_chip(uint8_t *msg, float *chip, scf_msg_verifier verifier)
         }
     }
 
-    return 0;
+    return msg_len;
 }
