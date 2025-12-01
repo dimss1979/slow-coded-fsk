@@ -81,16 +81,25 @@ void encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg)
         pos++;
     }
 
+    size_t packet_type = -1;
+    for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
+        if (scf_packet_len[i] == MSG_LEN) {
+            packet_type = i;
+            break;
+        }
+    }
+    assert(packet_type >= 0);
+    assert(MSG_LEN <= SCF_MSG_MAX);
+    packet_type ^= 0xF0;
+
     for (size_t i = 0; i < SCF_HDR_LEN; i++) {
-        // Fake header
-        packet[pos] = i % 0x0F;
+        packet[pos] = scf_header_code[packet_type][i];
         pos++;
     }
 
-    for (size_t i = 0; i < MSG_LEN; i++) {
-        // Fake data
-        for (size_t j = 0; j < SCF_FEC_LEN; j++) {
-            packet[pos] = msg[i] ^ j;
+    for (size_t j = 0; j < SCF_FEC_LEN; j++) {
+        for (size_t i = 0; i < MSG_LEN; i++) {
+            packet[pos] = scf_data_code[msg[i]][j];
             pos++;
         }
     }
@@ -160,7 +169,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 10.88f);
+    add_awgn(noise, RX_SIGNAL_LEN, 8.7f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
@@ -179,6 +188,7 @@ bool run_test(void)
     scf_rx_init(CARRIER_FREQ, preamble);
     unsigned int symbol_count = 0;
     bool message_is_decoded = false;
+    size_t error_count = 0;
     uint64_t decoder_time_start = get_msec();
 
     for (
@@ -190,14 +200,20 @@ bool run_test(void)
         if (received_message_len) {
             printf("Decoded PSDU %li bytes\n", received_message_len);
             assert(received_message_len == MSG_LEN);
-            assert(!memcmp(tx_message, rx_message, MSG_LEN));
             message_is_decoded = true;
+
+            for (size_t b = 0; b < MSG_LEN; b++) {
+                if (rx_message[b] != tx_message[b]) {
+                    message_is_decoded = false;
+                    error_count++;
+                }
+            }
             break;
         }
     }
 
     uint64_t decoder_time = get_msec() - decoder_time_start;
-    printf("%s received after %u symbols in %lu msec\n\n", message_is_decoded ? "    " : " NOT", symbol_count, decoder_time);
+    printf("%s received with %li errors after %u symbols in %lu msec\n\n", message_is_decoded ? "    " : " NOT", error_count, symbol_count, decoder_time);
 
     return message_is_decoded;
 }
