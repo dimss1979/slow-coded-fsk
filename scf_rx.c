@@ -12,7 +12,7 @@
 #include "scf_filter.h"
 #include "scf_rx.h"
 
-#define CHIP_PHASES 8
+#define CHIP_PHASES 4
 #define FFT_RATIO 4
 #define FFT_LEN (SCF_BB_CHIP_LEN * FFT_RATIO)
 #define CW_FILTER_LEN 13

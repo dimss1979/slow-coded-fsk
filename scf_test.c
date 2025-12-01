@@ -202,7 +202,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 2.74f);
+    add_awgn(noise, RX_SIGNAL_LEN, 2.72f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
