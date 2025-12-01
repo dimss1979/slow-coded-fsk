@@ -10,23 +10,21 @@
 #include <time.h>
 #include <assert.h>
 #include <sys/random.h>
+#include <stdbool.h>
 
 #include "scf.h"
 #include "scf_filter.h"
-#include "scf_inner.h"
 #include "scf_tx.h"
 #include "scf_rx.h"
-#include "scf_outer.h"
 #include "scf_packet.h"
 
 #define MSG_LEN 100 /* bytes */
-#define PKT_LEN 120 /* bytes */
-#define CRC_LEN 3 /* bytes */
-
-#define START_OFFSET 2
-#define RX_SIGNAL_LEN ((START_OFFSET + 1 + SCF_PREAMBLE + PKT_LEN + 6) * SCF_SYMBOL_LEN) /* samples */
-#define TX_SIGNAL_LEN ((SCF_PREAMBLE + PKT_LEN) * SCF_SYMBOL_LEN) /* samples */
+#define START_OFFSET 20 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
+
+#define PKT_LEN (SCF_PREAMBLE + SCF_HDR_LEN + SCF_FEC_LEN * MSG_LEN) /* symbols */
+#define RX_SIGNAL_LEN ((START_OFFSET + PKT_LEN + START_OFFSET) * SCF_SYM_LEN) /* samples */
+#define TX_SIGNAL_LEN (PKT_LEN * SCF_SYM_LEN) /* samples */
 
 gsl_rng *rng;
 
@@ -61,33 +59,41 @@ void dump_signal(char *filename, float *signal, size_t len)
     close(f);
 }
 
-static uint32_t crc24(uint8_t *input, size_t len)
-{
-    uint32_t crc = 0xB704CE;
-    while (len--) {
-        crc ^= (*input++) << 16;
-        for (size_t i = 0; i < 8; i++) {
-            crc <<= 1;
-            if (crc & 0x1000000) {
-                crc &= 0XFFFFFF;
-                crc ^= 0x864CFB;
-            }
-        }
-    }
-    return crc & 0xFFFFFF;
-}
-
 void generate_message(uint8_t *msg)
 {
     for (size_t i = 0; i < MSG_LEN; i++) {
-        msg[i] = gsl_rng_get(rng) % SCF_SYMBOL_M;
+        msg[i] = gsl_rng_get(rng);
+    }
+}
+
+void generate_preamble(uint8_t *preamble)
+{
+    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        preamble[i] = gsl_rng_get(rng) & 0x0F;
+    }
+}
+
+void encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg)
+{
+    size_t pos = 0;
+    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        packet[pos] = preamble[i];
+        pos++;
     }
 
-    uint32_t crc = crc24(msg, MSG_LEN - CRC_LEN);
+    for (size_t i = 0; i < SCF_HDR_LEN; i++) {
+        // Fake header
+        packet[pos] = i % 0x0F;
+        pos++;
+    }
 
-    msg[MSG_LEN - 3] = crc >> 16;
-    msg[MSG_LEN - 2] = crc >> 8;
-    msg[MSG_LEN - 1] = crc;
+    for (size_t i = 0; i < MSG_LEN; i++) {
+        // Fake data
+        for (size_t j = 0; j < SCF_FEC_LEN; j++) {
+            packet[pos] = msg[i] ^ j;
+            pos++;
+        }
+    }
 }
 
 void add_awgn(float *out, size_t len, float sigma)
@@ -128,75 +134,27 @@ float measure_power(float *signal, size_t len)
     return energy / (double) len;
 }
 
-static bool msg_verifier(uint8_t *msg, size_t msg_len)
-{
-    if (msg_len < CRC_LEN + 1)
-        return false;
-
-    uint32_t crc = crc24(msg, msg_len - CRC_LEN);
-    uint32_t received_crc = (msg[msg_len - 3] << 16) | (msg[msg_len - 2] << 8) | msg[msg_len - 1];
-
-    if (crc == received_crc)
-        return true;
-    else
-        return false;
-}
-
 bool run_test(void)
 {
     memset(noise, 0, RX_SIGNAL_LEN * sizeof(noise[0]));
 
-    // Other user (CDMA test)
+    // TX
 
-    float other_user_level = 0.00001f;
-
-    getrandom(preamble, SCF_PREAMBLE, 0);
-    scf_inner_generate(gsl_rng_get(rng));
+    generate_preamble(preamble);
     generate_message(tx_message);
-    assert(scf_outer_encode(tx_packet, tx_message, MSG_LEN) == PKT_LEN);
+    encode_packet(tx_packet, preamble, tx_message);
 
-    size_t tx_rand_delay = (gsl_rng_uniform(rng) + START_OFFSET) * SCF_SYMBOL_LEN;
+    size_t tx_rand_delay = (gsl_rng_uniform(rng) + START_OFFSET) * SCF_SYM_LEN;
     float tx_rand_freq_offset = (gsl_rng_uniform(rng) - 0.5f) * 2.0f * 800.0f;
 
     scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
     size_t signal_i = tx_rand_delay;
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        scf_tx(&noise[signal_i], preamble[i], other_user_level);
-        signal_i += SCF_SYMBOL_LEN;
-    }
-    for (size_t i = 0; i < PKT_LEN; i++) {
-        scf_tx(&noise[signal_i], tx_packet[i], other_user_level);
-        signal_i += SCF_SYMBOL_LEN;
-    }
-
-    // TX
-
-    getrandom(preamble, SCF_PREAMBLE, 0);
-    scf_inner_generate(gsl_rng_get(rng));
-    generate_message(tx_message);
-    assert(scf_outer_encode(tx_packet, tx_message, MSG_LEN) == PKT_LEN);
-
-    tx_rand_delay = (gsl_rng_uniform(rng) + START_OFFSET) * SCF_SYMBOL_LEN;
-    tx_rand_freq_offset = (gsl_rng_uniform(rng) - 0.5f) * 2.0f * 800.0f;
-
-    scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
-    signal_i = tx_rand_delay;
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        scf_tx(&noise[signal_i], preamble[i], 1.0f);
-        signal_i += SCF_SYMBOL_LEN;
-    }
     for (size_t i = 0; i < PKT_LEN; i++) {
         scf_tx(&tx_signal[signal_i], tx_packet[i], 1.0f);
-        signal_i += SCF_SYMBOL_LEN;
+        signal_i += SCF_SYM_LEN;
     }
     //dump_signal("dump_tx_signal.raw", tx_signal, RX_SIGNAL_LEN);
     //exit(1);
-
-    for (size_t i = 0; i < RX_SIGNAL_LEN - 100; i++) {
-        // Multipath
-        //tx_signal[i] += 1.0f * tx_signal[i + 16];
-        //tx_signal[i] *= 0.65f;
-    }
 
     float signal_power = measure_power(&tx_signal[tx_rand_delay], TX_SIGNAL_LEN);
 
@@ -207,7 +165,7 @@ bool run_test(void)
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
     float snr = 10.0f * log10f(signal_power / noise_power);
-    const float user_bitrate = (8.0f * MSG_LEN) / ((SCF_PREAMBLE + PKT_LEN) * SCF_SYMBOL_LEN / SCF_SRATE);
+    const float user_bitrate = (8.0f * MSG_LEN) / (PKT_LEN * SCF_SYM_LEN / SCF_SRATE);
     float channel_bandwidth = (float) SCF_SRATE / 2.0f;
     float ebno = snr - 10.0f * log10f(user_bitrate / channel_bandwidth);
     printf(" snr: %f dB\n", snr);
@@ -225,10 +183,10 @@ bool run_test(void)
 
     for (
         size_t i = 0;
-        i < RX_SIGNAL_LEN - SCF_CHIP_LEN + 1;
-        i += SCF_CHIP_LEN
+        i < RX_SIGNAL_LEN - SCF_SYM_LEN;
+        i += SCF_SYM_LEN
     ) {
-        size_t received_message_len = scf_rx_chip(rx_message, &rx_signal[i], msg_verifier);
+        size_t received_message_len = scf_rx_symbol(rx_message, &rx_signal[i]);
         if (received_message_len) {
             printf("Decoded PSDU %li bytes\n", received_message_len);
             assert(received_message_len == MSG_LEN);

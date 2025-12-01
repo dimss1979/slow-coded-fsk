@@ -3,15 +3,14 @@
 #include <stddef.h>
 
 #include "scf.h"
-#include "scf_inner.h"
 #include "scf_filter.h"
 #include "scf_tx.h"
 
-#define MOD_FILTER_LEN (SCF_CHIP_LEN / 10)
+#define MOD_FILTER_LEN (SCF_SYM_LEN / 10)
 
 static float carrier_freq;
 static float carrier_phase;
-static const float freq_step = (float) SCF_SRATE / SCF_CHIP_LEN;
+static const float freq_step = (float) SCF_SRATE / SCF_SYM_LEN;
 
 static float mod_filter_buf[MOD_FILTER_LEN];
 static float mod_filter_kernel[MOD_FILTER_LEN];
@@ -55,16 +54,14 @@ void scf_tx_init(float freq)
 
 void scf_tx(float *passband, uint8_t symbol, float gain)
 {
-    for (size_t c = 0; c < SCF_CHIPS; c++) {
-        float freq = carrier_freq + freq_step * scf_inner_code[symbol][c];
+    float freq = carrier_freq + freq_step * symbol;
 
-        for (size_t i = 0; i < SCF_CHIP_LEN; i++) {
-            passband[i + c * SCF_CHIP_LEN] = gain * sinf(carrier_phase);
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        passband[i] = gain * sinf(carrier_phase);
 
-            carrier_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_SRATE);
-            while (carrier_phase > 2.0f * M_PI) {
-                carrier_phase -= 2.0f * M_PI;
-            }
+        carrier_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_SRATE);
+        while (carrier_phase > 2.0f * M_PI) {
+            carrier_phase -= 2.0f * M_PI;
         }
     }
 }

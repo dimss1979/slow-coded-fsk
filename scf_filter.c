@@ -24,10 +24,10 @@ static unsigned int initialized;
 static void scf_filter_internal(complex float *out, complex float *in, complex float *tail, size_t tail_len, complex float *fir_fd)
 {
     assert(initialized);
-    assert(SCF_CHIP_LEN + tail_len <= FIR_FFT_LEN);
+    assert(SCF_SYM_LEN + tail_len <= FIR_FFT_LEN);
 
     memset(fft_in, 0, FIR_FFT_LEN * sizeof(fft_in[0]));
-    memcpy(fft_in, in, SCF_CHIP_LEN * sizeof(fft_in[0]));
+    memcpy(fft_in, in, SCF_SYM_LEN * sizeof(fft_in[0]));
 
     fftwf_execute(fft);
 
@@ -44,8 +44,8 @@ static void scf_filter_internal(complex float *out, complex float *in, complex f
     for (size_t i = 0; i < tail_len; i++) {
         ifft_out[i] += tail[i];
     }
-    memcpy(out, ifft_out, SCF_CHIP_LEN * sizeof(out[0]));
-    memcpy(tail, &ifft_out[SCF_CHIP_LEN], tail_len * sizeof(tail[0]));
+    memcpy(out, ifft_out, SCF_SYM_LEN * sizeof(out[0]));
+    memcpy(tail, &ifft_out[SCF_SYM_LEN], tail_len * sizeof(tail[0]));
 }
 
 void scf_filter_init(void)

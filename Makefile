@@ -14,7 +14,7 @@ HEADERS = $(wildcard *.h)
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ -c $<
 
-scf_test: scf_test.o scf_filter.o scf_inner.o scf_tx.o scf_rx.o scf_outer.o scf_packet.o
+scf_test: scf_test.o scf_filter.o scf_tx.o scf_rx.o scf_packet.o
 	$(CC) $(CFLAGS) -o $@ $? -lfftw3f -lgsl -lm -lfec
 
 clean:
