@@ -6,6 +6,7 @@
 #include <math.h>
 #include <float.h>
 #include <stdbool.h>
+#include <fec.h>
 
 #include "scf.h"
 #include "scf_filter.h"
@@ -50,10 +51,15 @@ static size_t rx_phase;
 static size_t header_pos;
 static int8_t header_buf[SCF_HDR_LEN * SCF_TONES];
 static int32_t last_preamble_weight;
-static size_t data_bytes;
+static size_t data_raw_len;
+static size_t data_fec_len;
 static size_t data_byte;
 static size_t data_sym;
-static int8_t data_buf[SCF_MSG_MAX][SCF_FEC_LEN * SCF_TONES];
+static int8_t data_buf[SCF_MSG_FEC_MAX][SCF_FEC_LEN * SCF_TONES];
+static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
+static int32_t data_weight_buf[SCF_MSG_FEC_MAX];
+static void *data_rs_code;
+static scf_msg_verifier data_verifier;
 
 static size_t cw_filter_idx;
 static const float cw_filter_kernel[CW_FILTER_LEN] = {
@@ -227,6 +233,56 @@ static uint8_t ml_decode(int32_t *weight, int8_t *codeword, size_t codeword_size
     return max_symbol;
 }
 
+static bool msg_decode(uint8_t *msg)
+{
+    int eras_pos[SCF_MSG_FEC_MAX];
+    int eras_no_max = data_fec_len - data_raw_len;
+    int eras_mark[SCF_MSG_FEC_MAX] = {0};
+
+    for (size_t i = 0; i < eras_no_max; i++) {
+        int32_t min_weight = INT32_MAX;
+        int min_pos = 0;
+
+        for (size_t j = 0; j < data_fec_len; j++) {
+            if (!eras_mark[j] && data_weight_buf[j] < min_weight) {
+                min_weight = data_weight_buf[j];
+                min_pos = j;
+            }
+        }
+
+        eras_mark[min_pos] = 1;
+        eras_pos[i] = min_pos;
+    }
+
+    for (size_t eras_no = 0; eras_no <= eras_no_max; eras_no += 2) {
+        int eras_pos_tmp[SCF_MSG_FEC_MAX];
+        memcpy(eras_pos_tmp, eras_pos, sizeof(eras_pos_tmp));
+
+        uint8_t rs_buf[SCF_MSG_FEC_MAX];
+        for (size_t i = 0; i < data_fec_len; i++) {
+            rs_buf[i] = data_fec_buf[i];
+        }
+
+        int symbol_error_count = decode_rs_char(
+            data_rs_code,
+            rs_buf,
+            eras_pos_tmp,
+            eras_no
+        );
+
+        //printf("+++ Erasures: %li Errors: %i\n", eras_no, symbol_error_count);
+
+        if (symbol_error_count >= 0) {
+            if (data_verifier(rs_buf, data_raw_len)) {
+                memcpy(msg, rs_buf, data_raw_len);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static void fft_window_init(void)
 {
     for (size_t i = 0; i < BB_SYM_LEN; i++) {
@@ -234,12 +290,13 @@ static void fft_window_init(void)
     }
 }
 
-void scf_rx_init(float freq, uint8_t *preamble)
+void scf_rx_init(float freq, uint8_t *preamble, scf_msg_verifier verifier)
 {
     state = S_PREAMBLE;
     symbol_counter = 0;
     carrier_freq = freq;
     memcpy(preamble_ref, preamble, SCF_PREAMBLE);
+    data_verifier = verifier;
 
     if (!initialized) {
         for (size_t i = 0; i < SYM_PHASES; i++) {
@@ -293,6 +350,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     switch (state) {
         case S_PREAMBLE:
             if (preamble_found) {
+                //printf(" +++ Preamble at %i\n", symbol_counter);
                 last_preamble_weight = max_preamble_weight;
                 header_pos = 0;
                 rx_phase = max_preamble_phase;
@@ -304,6 +362,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
         case S_HEADER:
             if (header_pos == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
+                //printf(" +++ BETTER Preamble at %i\n", symbol_counter);
                 last_preamble_weight = max_preamble_weight;
                 rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
@@ -318,8 +377,11 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
                     if (header_byte >= SCF_PACKET_TYPES) {
                         state = S_PREAMBLE;
+                        //printf(" !!! Header failed\n");
                     } else {
-                        data_bytes = scf_packet_len[header_byte];
+                        data_raw_len = scf_packet_raw_len[header_byte];
+                        data_fec_len = scf_packet_fec_len[header_byte];
+                        data_rs_code = scf_packet_rs_code[header_byte];
                         data_byte = 0;
                         data_sym = 0;
                         state = S_DATA;
@@ -335,17 +397,20 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
             if (data_sym == SCF_FEC_LEN - 1) {
                 int32_t byte_weight;
                 uint8_t byte_val = ml_decode(&byte_weight, &data_buf[data_byte][0], SCF_FEC_LEN, &scf_data_code[0][0]);
-                msg[data_byte] = byte_val;
+                data_fec_buf[data_byte] = byte_val;
+                data_weight_buf[data_byte] = byte_weight;
             }
 
             data_byte++;
-            if (data_byte == data_bytes) {
+            if (data_byte == data_fec_len) {
                 data_byte = 0;
                 data_sym++;
             }
 
             if (data_sym == SCF_FEC_LEN) {
-                msg_len = data_bytes;
+                if (msg_decode(msg)) {
+                    msg_len = data_raw_len;
+                }
                 state = S_PREAMBLE;
             }
 

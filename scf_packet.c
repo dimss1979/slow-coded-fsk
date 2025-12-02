@@ -8,10 +8,15 @@
 
 static bool initialized = false;
 
-size_t scf_packet_len[SCF_PACKET_TYPES] = {
+size_t scf_packet_raw_len[SCF_PACKET_TYPES] = {
     100,
     200,
 };
+size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
+    120,
+    240,
+};
+void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint8_t scf_header_code[256][SCF_HDR_LEN];
 uint8_t scf_data_code[256][SCF_FEC_LEN];
 
@@ -38,6 +43,15 @@ void scf_packet_init(void)
 
     free_rs_char(rs_header_code);
     free_rs_char(rs_data_code);
+
+    for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
+        scf_packet_rs_code[i] = init_rs_char(
+            8, 0x11d, 1, 1,
+            scf_packet_fec_len[i] - scf_packet_raw_len[i],
+            255 - scf_packet_fec_len[i]
+        );
+        assert(scf_packet_rs_code[i]);
+    }
 
     initialized = true;
 }

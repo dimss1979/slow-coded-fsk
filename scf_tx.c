@@ -1,9 +1,12 @@
-#include <complex.h>
 #include <math.h>
 #include <stddef.h>
+#include <assert.h>
+#include <string.h>
+#include <fec.h>
 
 #include "scf.h"
 #include "scf_filter.h"
+#include "scf_packet.h"
 #include "scf_tx.h"
 
 #define MOD_FILTER_LEN (SCF_SYM_LEN / 10)
@@ -30,7 +33,7 @@ static float mod_filter(float x)
     return y;
 }
 
-void mod_filter_init(void)
+static void mod_filter_init(void)
 {
     float dc_gain = 0.0f;
 
@@ -50,6 +53,47 @@ void scf_tx_init(float freq)
     mod_filter_init();
 
     carrier_freq = freq;
+}
+
+size_t scf_encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg, size_t msg_len)
+{
+    size_t packet_type = -1;
+    size_t msg_fec_len = 0;
+    void *rs_code = NULL;
+    for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
+        if (scf_packet_raw_len[i] == msg_len) {
+            packet_type = i;
+            msg_fec_len = scf_packet_fec_len[i];
+            rs_code = scf_packet_rs_code[i];
+            break;
+        }
+    }
+    assert(packet_type >= 0);
+    packet_type ^= 0xF0;
+
+    uint8_t msg_fec[SCF_MSG_FEC_MAX];
+    memcpy(msg_fec, msg, msg_len);
+    encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
+
+    size_t pos = 0;
+    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        packet[pos] = preamble[i];
+        pos++;
+    }
+
+    for (size_t i = 0; i < SCF_HDR_LEN; i++) {
+        packet[pos] = scf_header_code[packet_type][i];
+        pos++;
+    }
+
+    for (size_t j = 0; j < SCF_FEC_LEN; j++) {
+        for (size_t i = 0; i < msg_fec_len; i++) {
+            packet[pos] = scf_data_code[msg_fec[i]][j];
+            pos++;
+        }
+    }
+
+    return pos;
 }
 
 void scf_tx(float *passband, uint8_t symbol, float gain)
