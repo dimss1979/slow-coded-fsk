@@ -24,7 +24,7 @@
 struct sym_phase {
     complex float *source;
     float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
-    int8_t preamble_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
+    int8_t demod_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
 };
 
 typedef enum {
@@ -42,11 +42,11 @@ static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
 static float fft_window[BB_SYM_LEN];
 static uint8_t preamble_ref[SCF_PREAMBLE];
-static size_t preamble_idx;
+static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static e_state state = S_PREAMBLE;
 static size_t rx_bin;
-static size_t header_phase;
+static size_t rx_phase;
 static size_t header_pos;
 static int8_t header_buf[SCF_HDR_LEN * SCF_TONES];
 static int32_t last_preamble_weight;
@@ -139,7 +139,17 @@ static void demodulate(struct sym_phase *c)
         }
         for (size_t j = 0; j < SCF_TONES; j++) {
             size_t f = (i + j * FFT_RATIO) % FFT_LEN;
-            c->preamble_buf[i][preamble_idx][j] = 127.0f * filtered_power[f] / filtered_power_sum;
+            c->demod_buf[i][demod_buf_idx][j] = 127.0f * filtered_power[f] / filtered_power_sum;
+        }
+
+        if (i == rx_bin) {
+            int8_t max_weight = INT8_MIN;
+            for (size_t j = 0; j < SCF_TONES; j++) {
+                int8_t weight = c->demod_buf[i][demod_buf_idx][j];
+                if (weight > max_weight) {
+                    max_weight = weight;
+                }
+            }
         }
     }
 }
@@ -153,8 +163,8 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
         int32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = preamble_ref[i];
-            size_t pos = (preamble_idx + i + 1) % SCF_PREAMBLE;
-            weight += p->preamble_buf[b][pos][t];
+            size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+            weight += p->demod_buf[b][pos][t];
         }
 
         if (weight > max_weight) {
@@ -172,12 +182,12 @@ static bool decode_preamble(struct sym_phase *p, size_t preamble_bin)
     unsigned int correct = 0;
 
     for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        size_t pos = (preamble_idx + i + 1) % SCF_PREAMBLE;
+        size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
         int32_t max_weight = INT32_MIN;
         uint8_t symbol = 0;
 
         for (size_t t = 0; t < SCF_TONES; t++) {
-            int32_t weight = p->preamble_buf[preamble_bin][pos][t];
+            int32_t weight = p->demod_buf[preamble_bin][pos][t];
             if (weight > max_weight) {
                 max_weight = weight;
                 symbol = t;
@@ -285,7 +295,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
             if (preamble_found) {
                 last_preamble_weight = max_preamble_weight;
                 header_pos = 0;
-                header_phase = max_preamble_phase;
+                rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
                 state = S_HEADER;
             }
@@ -295,10 +305,10 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         case S_HEADER:
             if (header_pos == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
                 last_preamble_weight = max_preamble_weight;
-                header_phase = max_preamble_phase;
+                rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
             } else {
-                memcpy(&header_buf[header_pos * SCF_TONES], &sym_phase[header_phase].preamble_buf[rx_bin][preamble_idx][0], SCF_TONES);
+                memcpy(&header_buf[header_pos * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
                 header_pos++;
 
                 if (header_pos == SCF_HDR_LEN) {
@@ -320,7 +330,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
             break;
 
         case S_DATA:
-            memcpy(&data_buf[data_byte][data_sym * SCF_TONES], &sym_phase[header_phase].preamble_buf[rx_bin][preamble_idx][0], SCF_TONES);
+            memcpy(&data_buf[data_byte][data_sym * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
 
             if (data_sym == SCF_FEC_LEN - 1) {
                 int32_t byte_weight;
@@ -343,7 +353,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     }
 
 
-    preamble_idx = (preamble_idx + 1) % SCF_PREAMBLE;
+    demod_buf_idx = (demod_buf_idx + 1) % SCF_PREAMBLE;
     cw_filter_idx = (cw_filter_idx + 1) % CW_FILTER_LEN;
 
     symbol_counter++;
