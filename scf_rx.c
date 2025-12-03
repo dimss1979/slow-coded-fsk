@@ -242,6 +242,9 @@ static bool msg_decode(uint8_t *msg)
         );
 
         if (symbol_error_count >= 0) {
+            for (size_t i = 0; i < data_raw_len; i++) {
+                rs_buf[i] ^= scf_data_scrambler[i];
+            }
             if (data_verifier(rs_buf, data_raw_len)) {
                 printf(" +++ Outer FEC erasures: %li errors: %i\n", eras_no, symbol_error_count);
                 memcpy(msg, rs_buf, data_raw_len);

@@ -72,7 +72,9 @@ size_t scf_encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg, size_
     packet_type ^= 0xF0;
 
     uint8_t msg_fec[SCF_MSG_FEC_MAX];
-    memcpy(msg_fec, msg, msg_len);
+    for (size_t i = 0; i < msg_len; i++) {
+        msg_fec[i] = msg[i] ^ scf_data_scrambler[i];
+    }
     encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
 
     size_t pos = 0;

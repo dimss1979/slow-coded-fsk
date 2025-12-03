@@ -19,7 +19,17 @@ size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
 void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint8_t scf_header_code[256][SCF_HDR_LEN];
 uint8_t scf_data_code[256][SCF_FEC_LEN];
+uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
 
+static uint32_t xorshift32(uint32_t *state) {
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+
+    return x;
+}
 
 void scf_packet_init(void)
 {
@@ -51,6 +61,11 @@ void scf_packet_init(void)
             255 - scf_packet_fec_len[i]
         );
         assert(scf_packet_rs_code[i]);
+    }
+
+    uint32_t xorshift32_state = 1;
+    for (size_t i = 0; i < SCF_MSG_FEC_MAX; i++) {
+        scf_data_scrambler[i] = xorshift32(&xorshift32_state);
     }
 
     initialized = true;
