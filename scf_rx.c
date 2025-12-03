@@ -241,10 +241,9 @@ static bool msg_decode(uint8_t *msg)
             eras_no
         );
 
-        //printf("+++ Erasures: %li Errors: %i\n", eras_no, symbol_error_count);
-
         if (symbol_error_count >= 0) {
             if (data_verifier(rs_buf, data_raw_len)) {
+                printf(" +++ Outer FEC erasures: %li errors: %i\n", eras_no, symbol_error_count);
                 memcpy(msg, rs_buf, data_raw_len);
                 return true;
             }
@@ -324,7 +323,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     switch (state) {
         case S_PREAMBLE:
             if (preamble_found) {
-                //printf(" +++ Preamble at %i\n", symbol_counter);
+                printf(" +++ Preamble at %i weight %i\n", symbol_counter, max_preamble_weight);
                 last_preamble_weight = max_preamble_weight;
                 header_pos = 0;
                 rx_phase = max_preamble_phase;
@@ -336,7 +335,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
         case S_HEADER:
             if (header_pos == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
-                //printf(" +++ BETTER Preamble at %i\n", symbol_counter);
+                printf(" +++ BETTER Preamble at %i weight %i\n", symbol_counter, max_preamble_weight);
                 last_preamble_weight = max_preamble_weight;
                 rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
@@ -351,7 +350,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
                     if (header_byte >= SCF_PACKET_TYPES) {
                         state = S_PREAMBLE;
-                        //printf(" !!! Header failed\n");
+                        printf(" !!! Header failed\n");
                     } else {
                         data_raw_len = scf_packet_raw_len[header_byte];
                         data_fec_len = scf_packet_fec_len[header_byte];
@@ -385,6 +384,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 if (msg_decode(msg)) {
                     msg_len = data_raw_len;
                 }
+                printf(" +++ Data finished at %i\n", symbol_counter);
                 state = S_PREAMBLE;
             }
 
