@@ -183,35 +183,6 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
     *preamble_bin = max_bin;
 }
 
-static bool decode_preamble(struct sym_phase *p, size_t preamble_bin)
-{
-    unsigned int correct = 0;
-
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
-        int32_t max_weight = INT32_MIN;
-        uint8_t symbol = 0;
-
-        for (size_t t = 0; t < SCF_TONES; t++) {
-            int32_t weight = p->demod_buf[preamble_bin][pos][t];
-            if (weight > max_weight) {
-                max_weight = weight;
-                symbol = t;
-            }
-        }
-
-        if (symbol == preamble_ref[i]) {
-            correct++;
-        }
-    }
-
-    if (correct >= SCF_PREAMBLE_REQUIRED) {
-        return true;
-    }
-
-    return false;
-}
-
 static uint8_t ml_decode(int32_t *weight, int8_t *codeword, size_t codeword_size, uint8_t *code_table)
 {
     int32_t max_weight = INT32_MIN;
@@ -345,7 +316,10 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         }
     }
 
-    bool preamble_found = decode_preamble(&sym_phase[max_preamble_phase], max_preamble_bin);
+    bool preamble_found = false;
+    if (max_preamble_weight > SCF_PREAMBLE_THR) {
+        preamble_found = true;
+    }
 
     switch (state) {
         case S_PREAMBLE:
