@@ -15,7 +15,7 @@
 
 #define SYM_PHASES 4
 #define FFT_RATIO 4
-#define CW_FILTER_LEN 13
+#define CW_FILTER_LEN 12
 #define DEC_RATIO 4
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
@@ -25,6 +25,7 @@
 struct sym_phase {
     complex float *source;
     float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
+    float cw_filter_sum[FFT_LEN];
     int8_t demod_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
 };
 
@@ -60,37 +61,17 @@ static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
 static int32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
 static scf_msg_verifier data_verifier;
-
 static size_t cw_filter_idx;
-static const float cw_filter_kernel[CW_FILTER_LEN] = {
-    -0.058941394880239056,
-    -0.067400917530924781,
-    -0.074796392092324623,
-    -0.080855873165259634,
-    -0.085354127494019216,
-    -0.088122662998354445,
-    0.910942736322243651,
-    -0.088122662998354445,
-    -0.085354127494019216,
-    -0.080855873165259634,
-    -0.074796392092324623,
-    -0.067400917530924781,
-    -0.058941394880239056,
-};
 
 static bool initialized;
 
-static float cw_filter(float *cw_filter_buf, float x)
+static float cw_filter(float *cw_filter_buf, float *cw_filter_sum, float x)
 {
+    *cw_filter_sum -= cw_filter_buf[cw_filter_idx];
     cw_filter_buf[cw_filter_idx] = x;
+    *cw_filter_sum += x;
 
-    float y = 0.0f;
-    for (size_t i = 0; i < CW_FILTER_LEN; i++) {
-        size_t pos = (cw_filter_idx + i + 1) % CW_FILTER_LEN;
-        y += cw_filter_buf[pos] * cw_filter_kernel[i];
-    }
-
-    return y;
+    return x - (*cw_filter_sum / CW_FILTER_LEN);
 }
 
 static void downconvert(float *signal)
@@ -133,7 +114,7 @@ static void demodulate(struct sym_phase *c)
     for (size_t i = 0; i < FFT_LEN; i++) {
         complex float bin = fft_buf[i];
         float power = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
-        filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], power);
+        filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], &c->cw_filter_sum[i], power);
     }
 
     for (size_t i = 0; i < FFT_LEN; i++) {
