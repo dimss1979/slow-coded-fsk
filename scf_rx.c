@@ -146,7 +146,7 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
     int32_t max_weight = INT32_MIN;
     size_t max_bin = 0;
 
-    for (size_t b = 0; b < FFT_LEN; b++) {
+    for (size_t b = 0; b < FFT_LEN; b += FFT_RATIO) {
         int32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = preamble_ref[i];
@@ -157,6 +157,23 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
         if (weight > max_weight) {
             max_weight = weight;
             max_bin = b;
+        }
+    }
+
+    size_t b0 = max_bin - FFT_RATIO * 2;
+    size_t b1 = max_bin + FFT_RATIO * 2;
+    for (size_t b = b0; b < b1; b++) {
+        size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
+        int32_t weight = 0;
+        for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+            uint8_t t = preamble_ref[i];
+            size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+            weight += p->demod_buf[b_wrapped][pos][t];
+        }
+
+        if (weight > max_weight) {
+            max_weight = weight;
+            max_bin = b_wrapped;
         }
     }
 
