@@ -15,7 +15,7 @@
 
 #define SYM_PHASES 4
 #define FFT_RATIO 4
-#define CW_FILTER_LEN 12
+#define CW_FILTER_LEN 10
 #define DEC_RATIO 4
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
@@ -25,8 +25,7 @@
 struct sym_phase {
     complex float *source;
     float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
-    float cw_filter_sum[FFT_LEN];
-    int8_t demod_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
+    uint8_t demod_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
 };
 
 typedef enum {
@@ -50,28 +49,33 @@ static e_state state = S_PREAMBLE;
 static size_t rx_bin;
 static size_t rx_phase;
 static size_t header_pos;
-static int8_t header_buf[SCF_HDR_LEN * SCF_TONES];
-static int32_t last_preamble_weight;
+static uint8_t header_buf[SCF_HDR_LEN * SCF_TONES];
+static uint32_t last_preamble_weight;
 static size_t data_raw_len;
 static size_t data_fec_len;
 static size_t data_byte;
 static size_t data_sym;
-static int8_t data_buf[SCF_MSG_FEC_MAX][SCF_FEC_LEN * SCF_TONES];
+static uint8_t data_buf[SCF_MSG_FEC_MAX][SCF_FEC_LEN * SCF_TONES];
 static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
-static int32_t data_weight_buf[SCF_MSG_FEC_MAX];
+static uint32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
 static scf_msg_verifier data_verifier;
 static size_t cw_filter_idx;
 
 static bool initialized;
 
-static float cw_filter(float *cw_filter_buf, float *cw_filter_sum, float x)
+static float cw_filter(float *cw_filter_buf, float x)
 {
-    *cw_filter_sum -= cw_filter_buf[cw_filter_idx];
     cw_filter_buf[cw_filter_idx] = x;
-    *cw_filter_sum += x;
 
-    return x - (*cw_filter_sum / CW_FILTER_LEN);
+    float min = FLT_MAX;
+    for (size_t i = 0; i < CW_FILTER_LEN; i++) {
+        if (cw_filter_buf[i] < min) {
+            min = cw_filter_buf[i];
+        }
+    }
+
+    return x - min;
 }
 
 static void downconvert(float *signal)
@@ -114,7 +118,7 @@ static void demodulate(struct sym_phase *c)
     for (size_t i = 0; i < FFT_LEN; i++) {
         complex float bin = fft_buf[i];
         float power = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
-        filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], &c->cw_filter_sum[i], power);
+        filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], power);
     }
 
     for (size_t i = 0; i < FFT_LEN; i++) {
@@ -122,17 +126,17 @@ static void demodulate(struct sym_phase *c)
 
         for (size_t j = 0; j < SCF_TONES; j++) {
             size_t f = (i + j * FFT_RATIO) % FFT_LEN;
-            filtered_power_sum += fabs(filtered_power[f]);
+            filtered_power_sum += filtered_power[f];
         }
         for (size_t j = 0; j < SCF_TONES; j++) {
             size_t f = (i + j * FFT_RATIO) % FFT_LEN;
-            c->demod_buf[i][demod_buf_idx][j] = 127.0f * filtered_power[f] / filtered_power_sum;
+            c->demod_buf[i][demod_buf_idx][j] = 255.0f * filtered_power[f] / filtered_power_sum;
         }
 
         if (i == rx_bin) {
-            int8_t max_weight = INT8_MIN;
+            uint8_t max_weight = 0;
             for (size_t j = 0; j < SCF_TONES; j++) {
-                int8_t weight = c->demod_buf[i][demod_buf_idx][j];
+                uint8_t weight = c->demod_buf[i][demod_buf_idx][j];
                 if (weight > max_weight) {
                     max_weight = weight;
                 }
@@ -141,13 +145,13 @@ static void demodulate(struct sym_phase *c)
     }
 }
 
-static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t *preamble_bin)
+static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, size_t *preamble_bin)
 {
-    int32_t max_weight = INT32_MIN;
+    uint32_t max_weight = 0;
     size_t max_bin = 0;
 
     for (size_t b = 0; b < FFT_LEN; b += FFT_RATIO) {
-        int32_t weight = 0;
+        uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = preamble_ref[i];
             size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
@@ -164,7 +168,7 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
     size_t b1 = max_bin + FFT_RATIO * 2;
     for (size_t b = b0; b < b1; b++) {
         size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
-        int32_t weight = 0;
+        uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = preamble_ref[i];
             size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
@@ -181,12 +185,12 @@ static void find_preamble(struct sym_phase *p, int32_t *preamble_weight, size_t 
     *preamble_bin = max_bin;
 }
 
-static uint8_t ml_decode(int32_t *weight, int8_t *codeword, size_t codeword_size, uint8_t *code_table)
+static uint8_t ml_decode(uint32_t *weight, uint8_t *codeword, size_t codeword_size, uint8_t *code_table)
 {
-    int32_t max_weight = INT32_MIN;
+    uint32_t max_weight = 0;
     uint8_t max_symbol = 0;
     for (size_t i = 0; i < 256; i++) {
-        int32_t weight = 0;
+        uint32_t weight = 0;
         for (size_t s = 0; s < codeword_size; s++) {
             size_t tone = code_table[i * codeword_size + s];
             weight += codeword[SCF_TONES * s + tone];
@@ -209,7 +213,7 @@ static bool msg_decode(uint8_t *msg)
     int eras_mark[SCF_MSG_FEC_MAX] = {0};
 
     for (size_t i = 0; i < eras_no_max; i++) {
-        int32_t min_weight = INT32_MAX;
+        uint32_t min_weight = UINT32_MAX;
         int min_pos = 0;
 
         for (size_t j = 0; j < data_fec_len; j++) {
@@ -298,14 +302,14 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
     downconvert(signal);
 
-    int32_t max_preamble_weight = INT32_MIN;
+    uint32_t max_preamble_weight = 0;
     size_t max_preamble_bin = 0;
     size_t max_preamble_phase = 0;
 
     for (size_t i = 0; i < SYM_PHASES; i++) {
         demodulate(&sym_phase[i]);
 
-        int32_t preamble_weight;
+        uint32_t preamble_weight;
         size_t preamble_bin;
         find_preamble(&sym_phase[i], &preamble_weight, &preamble_bin);
 
@@ -345,7 +349,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 header_pos++;
 
                 if (header_pos == SCF_HDR_LEN) {
-                    int32_t header_weight;
+                    uint32_t header_weight;
                     uint8_t header_byte = ml_decode(&header_weight, header_buf, SCF_HDR_LEN, &scf_header_code[0][0]);
                     header_byte ^= 0xF0;
 
@@ -369,7 +373,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
             memcpy(&data_buf[data_byte][data_sym * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
 
             if (data_sym == SCF_FEC_LEN - 1) {
-                int32_t byte_weight;
+                uint32_t byte_weight;
                 uint8_t byte_val = ml_decode(&byte_weight, &data_buf[data_byte][0], SCF_FEC_LEN, &scf_data_code[0][0]);
                 data_fec_buf[data_byte] = byte_val;
                 data_weight_buf[data_byte] = byte_weight;
