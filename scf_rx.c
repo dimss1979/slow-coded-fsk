@@ -145,7 +145,7 @@ static void demodulate(struct sym_phase *c)
     }
 }
 
-static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, size_t *preamble_bin)
+static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, uint32_t *preamble_symbols, size_t *preamble_bin)
 {
     uint32_t max_weight = 0;
     size_t max_bin = 0;
@@ -181,8 +181,29 @@ static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, size_t
         }
     }
 
-    *preamble_weight = max_weight;
-    *preamble_bin = max_bin;
+    uint32_t decoded_count = 0;
+    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+        uint8_t weight_max = 0;
+        uint8_t symbol = 0;
+        for (size_t t = 0; t < SCF_TONES; t++) {
+            uint8_t weight =  p->demod_buf[max_bin][pos][t];
+            if (weight > weight_max) {
+                weight_max = weight;
+                symbol = t;
+            }
+        }
+
+        if (symbol == preamble_ref[i]) {
+            decoded_count++;
+        }
+    }
+
+    if (decoded_count > SCF_PREAMBLE_THR) {
+        *preamble_weight = max_weight;
+        *preamble_symbols = decoded_count;
+        *preamble_bin = max_bin;
+    }
 }
 
 static uint8_t ml_decode(uint32_t *weight, uint8_t *codeword, size_t codeword_size, uint8_t *code_table)
@@ -303,32 +324,35 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     downconvert(signal);
 
     uint32_t max_preamble_weight = 0;
+    uint32_t max_preamble_symbols = 0;
     size_t max_preamble_bin = 0;
     size_t max_preamble_phase = 0;
 
     for (size_t i = 0; i < SYM_PHASES; i++) {
         demodulate(&sym_phase[i]);
 
-        uint32_t preamble_weight;
-        size_t preamble_bin;
-        find_preamble(&sym_phase[i], &preamble_weight, &preamble_bin);
+        uint32_t preamble_weight = 0;
+        uint32_t preamble_symbols = 0;
+        size_t preamble_bin = 0;
+        find_preamble(&sym_phase[i], &preamble_weight, &preamble_symbols, &preamble_bin);
 
         if (preamble_weight > max_preamble_weight) {
             max_preamble_weight = preamble_weight;
+            max_preamble_symbols = preamble_symbols;
             max_preamble_bin = preamble_bin;
             max_preamble_phase = i;
         }
     }
 
     bool preamble_found = false;
-    if (max_preamble_weight > SCF_PREAMBLE_THR) {
+    if (max_preamble_weight > 0) {
         preamble_found = true;
     }
 
     switch (state) {
         case S_PREAMBLE:
             if (preamble_found) {
-                printf(" +++ Preamble at %i weight %i\n", symbol_counter, max_preamble_weight);
+                printf(" +++ Preamble at %i weight %i symbols %u\n", symbol_counter, max_preamble_weight, max_preamble_symbols);
                 last_preamble_weight = max_preamble_weight;
                 header_pos = 0;
                 rx_phase = max_preamble_phase;
@@ -340,7 +364,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
         case S_HEADER:
             if (header_pos == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
-                printf(" +++ BETTER Preamble at %i weight %i\n", symbol_counter, max_preamble_weight);
+                printf(" +++ BETTER Preamble at %i weight %i symbols %u\n", symbol_counter, max_preamble_weight, max_preamble_symbols);
                 last_preamble_weight = max_preamble_weight;
                 rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
