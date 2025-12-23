@@ -25,7 +25,7 @@
 struct sym_phase {
     complex float *source;
     float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
-    uint8_t demod_buf[FFT_LEN][SCF_PREAMBLE][SCF_TONES];
+    uint8_t demod_buf[FFT_LEN][SCF_PKT_MAX][SCF_TONES];
 };
 
 typedef enum {
@@ -49,9 +49,7 @@ static size_t rx_phase;
 static uint32_t last_preamble_weight;
 static size_t data_raw_len;
 static size_t data_fec_len;
-static size_t data_byte;
-static size_t data_sym;
-static uint8_t data_buf[SCF_MSG_FEC_MAX][SCF_FEC_LEN * SCF_TONES];
+static size_t data_count;
 static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
 static uint32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
@@ -150,7 +148,7 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = sync_vector[i];
-            size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+            size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
             weight += p->demod_buf[b][pos][t];
         }
 
@@ -167,7 +165,7 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
             uint8_t t = sync_vector[i];
-            size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+            size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
             weight += p->demod_buf[b_wrapped][pos][t];
         }
 
@@ -179,7 +177,7 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
 
     uint32_t decoded_count = 0;
     for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
+        size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
         uint8_t weight_max = 0;
         uint8_t symbol = 0;
         for (size_t t = 0; t < SCF_TONES; t++) {
@@ -368,15 +366,14 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 data_raw_len = scf_packet_raw_len[packet_type];
                 data_fec_len = scf_packet_fec_len[packet_type];
                 data_rs_code = scf_packet_rs_code[packet_type];
-                data_byte = 0;
-                data_sym = 0;
+                data_count = 0;
                 state = S_DATA;
             }
 
             break;
 
         case S_DATA:
-            if (data_byte == 0 && data_sym == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
+            if (data_count == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
                 printf(
                     " +++ Stronger preamble at %i match %u/%u, packet of %li bytes\n",
                         symbol_counter, max_preamble_symbols,
@@ -388,28 +385,29 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 data_raw_len = scf_packet_raw_len[packet_type];
                 data_fec_len = scf_packet_fec_len[packet_type];
                 data_rs_code = scf_packet_rs_code[packet_type];
-                data_byte = 0;
-                data_sym = 0;
+                data_count = 0;
 
                 break;
             }
 
-            memcpy(&data_buf[data_byte][data_sym * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
+            data_count++;
 
-            if (data_sym == SCF_FEC_LEN - 1) {
-                uint32_t byte_weight;
-                uint8_t byte_val = ml_decode(&byte_weight, &data_buf[data_byte][0], SCF_FEC_LEN, &scf_data_code[0][0]);
-                data_fec_buf[data_byte] = byte_val;
-                data_weight_buf[data_byte] = byte_weight;
-            }
+            if (data_count == SCF_FEC_LEN * data_fec_len) {
+                for (size_t i = 0; i < data_fec_len; i++) {
+                    uint8_t codeword[SCF_FEC_LEN][SCF_TONES];
+                    for (size_t j = 0; j < SCF_FEC_LEN; j++) {
+                        size_t pos = (demod_buf_idx - data_count + 1 + i + j * data_fec_len + SCF_PKT_MAX) % SCF_PKT_MAX;
+                        for (size_t t = 0; t < SCF_TONES; t++) {
+                            codeword[j][t] = sym_phase[rx_phase].demod_buf[rx_bin][pos][t];
+                        }
+                    }
 
-            data_byte++;
-            if (data_byte == data_fec_len) {
-                data_byte = 0;
-                data_sym++;
-            }
+                    uint32_t byte_weight;
+                    uint8_t byte_val = ml_decode(&byte_weight, &codeword[0][0], SCF_FEC_LEN, &scf_data_code[0][0]);
+                    data_fec_buf[i] = byte_val;
+                    data_weight_buf[i] = byte_weight;
+                }
 
-            if (data_sym == SCF_FEC_LEN) {
                 if (msg_decode(msg)) {
                     msg_len = data_raw_len;
                 }
@@ -421,7 +419,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     }
 
 
-    demod_buf_idx = (demod_buf_idx + 1) % SCF_PREAMBLE;
+    demod_buf_idx = (demod_buf_idx + 1) % SCF_PKT_MAX;
     cw_filter_idx = (cw_filter_idx + 1) % CW_FILTER_LEN;
 
     symbol_counter++;
