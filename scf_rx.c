@@ -30,7 +30,6 @@ struct sym_phase {
 
 typedef enum {
     S_PREAMBLE,
-    S_HEADER,
     S_DATA,
 } e_state;
 
@@ -42,14 +41,11 @@ static float carrier_freq;
 static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
 static float fft_window[BB_SYM_LEN];
-static uint8_t preamble_ref[SCF_PREAMBLE];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static e_state state = S_PREAMBLE;
 static size_t rx_bin;
 static size_t rx_phase;
-static size_t header_pos;
-static uint8_t header_buf[SCF_HDR_LEN * SCF_TONES];
 static uint32_t last_preamble_weight;
 static size_t data_raw_len;
 static size_t data_fec_len;
@@ -145,7 +141,7 @@ static void demodulate(struct sym_phase *c)
     }
 }
 
-static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, uint32_t *preamble_symbols, size_t *preamble_bin)
+static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *preamble_weight, uint32_t *preamble_symbols, size_t *preamble_bin)
 {
     uint32_t max_weight = 0;
     size_t max_bin = 0;
@@ -153,7 +149,7 @@ static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, uint32
     for (size_t b = 0; b < FFT_LEN; b += FFT_RATIO) {
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-            uint8_t t = preamble_ref[i];
+            uint8_t t = sync_vector[i];
             size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
             weight += p->demod_buf[b][pos][t];
         }
@@ -170,7 +166,7 @@ static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, uint32
         size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-            uint8_t t = preamble_ref[i];
+            uint8_t t = sync_vector[i];
             size_t pos = (demod_buf_idx + i + 1) % SCF_PREAMBLE;
             weight += p->demod_buf[b_wrapped][pos][t];
         }
@@ -194,7 +190,7 @@ static void find_preamble(struct sym_phase *p, uint32_t *preamble_weight, uint32
             }
         }
 
-        if (symbol == preamble_ref[i]) {
+        if (symbol == sync_vector[i]) {
             decoded_count++;
         }
     }
@@ -286,12 +282,11 @@ static void fft_window_init(void)
     }
 }
 
-void scf_rx_init(float freq, uint8_t *preamble, scf_msg_verifier verifier)
+void scf_rx_init(float freq, scf_msg_verifier verifier)
 {
     state = S_PREAMBLE;
     symbol_counter = 0;
     carrier_freq = freq;
-    memcpy(preamble_ref, preamble, SCF_PREAMBLE);
     data_verifier = verifier;
 
     if (!initialized) {
@@ -327,20 +322,30 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     uint32_t max_preamble_symbols = 0;
     size_t max_preamble_bin = 0;
     size_t max_preamble_phase = 0;
+    size_t packet_type = 0;
 
     for (size_t i = 0; i < SYM_PHASES; i++) {
         demodulate(&sym_phase[i]);
 
-        uint32_t preamble_weight = 0;
-        uint32_t preamble_symbols = 0;
-        size_t preamble_bin = 0;
-        find_preamble(&sym_phase[i], &preamble_weight, &preamble_symbols, &preamble_bin);
+        for (size_t pt = 0; pt < SCF_PACKET_TYPES; pt++) {
+            uint32_t preamble_weight = 0;
+            uint32_t preamble_symbols = 0;
+            size_t preamble_bin = 0;
+            find_preamble(
+                &sym_phase[i],
+                &scf_packet_sync_vector[pt][0],
+                &preamble_weight,
+                &preamble_symbols,
+                &preamble_bin
+            );
 
-        if (preamble_weight > max_preamble_weight) {
-            max_preamble_weight = preamble_weight;
-            max_preamble_symbols = preamble_symbols;
-            max_preamble_bin = preamble_bin;
-            max_preamble_phase = i;
+            if (preamble_weight > max_preamble_weight) {
+                max_preamble_weight = preamble_weight;
+                max_preamble_symbols = preamble_symbols;
+                max_preamble_bin = preamble_bin;
+                max_preamble_phase = i;
+                packet_type = pt;
+            }
         }
     }
 
@@ -352,48 +357,43 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
     switch (state) {
         case S_PREAMBLE:
             if (preamble_found) {
-                printf(" +++ Preamble at %i weight %i symbols %u\n", symbol_counter, max_preamble_weight, max_preamble_symbols);
-                last_preamble_weight = max_preamble_weight;
-                header_pos = 0;
-                rx_phase = max_preamble_phase;
-                rx_bin = max_preamble_bin;
-                state = S_HEADER;
-            }
-
-            break;
-
-        case S_HEADER:
-            if (header_pos == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
-                printf(" +++ BETTER Preamble at %i weight %i symbols %u\n", symbol_counter, max_preamble_weight, max_preamble_symbols);
+                printf(
+                    " +++ Preamble at %i match %u/%u, packet of %li bytes\n",
+                       symbol_counter, max_preamble_symbols,
+                       SCF_PREAMBLE, scf_packet_raw_len[packet_type]
+                );
                 last_preamble_weight = max_preamble_weight;
                 rx_phase = max_preamble_phase;
                 rx_bin = max_preamble_bin;
-            } else {
-                memcpy(&header_buf[header_pos * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
-                header_pos++;
-
-                if (header_pos == SCF_HDR_LEN) {
-                    uint32_t header_weight;
-                    uint8_t header_byte = ml_decode(&header_weight, header_buf, SCF_HDR_LEN, &scf_header_code[0][0]);
-                    header_byte ^= 0xF0;
-
-                    if (header_byte >= SCF_PACKET_TYPES) {
-                        state = S_PREAMBLE;
-                        printf(" !!! Header failed\n");
-                    } else {
-                        data_raw_len = scf_packet_raw_len[header_byte];
-                        data_fec_len = scf_packet_fec_len[header_byte];
-                        data_rs_code = scf_packet_rs_code[header_byte];
-                        data_byte = 0;
-                        data_sym = 0;
-                        state = S_DATA;
-                    }
-                }
+                data_raw_len = scf_packet_raw_len[packet_type];
+                data_fec_len = scf_packet_fec_len[packet_type];
+                data_rs_code = scf_packet_rs_code[packet_type];
+                data_byte = 0;
+                data_sym = 0;
+                state = S_DATA;
             }
 
             break;
 
         case S_DATA:
+            if (data_byte == 0 && data_sym == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
+                printf(
+                    " +++ Stronger preamble at %i match %u/%u, packet of %li bytes\n",
+                        symbol_counter, max_preamble_symbols,
+                       SCF_PREAMBLE, scf_packet_raw_len[packet_type]
+                );
+                last_preamble_weight = max_preamble_weight;
+                rx_phase = max_preamble_phase;
+                rx_bin = max_preamble_bin;
+                data_raw_len = scf_packet_raw_len[packet_type];
+                data_fec_len = scf_packet_fec_len[packet_type];
+                data_rs_code = scf_packet_rs_code[packet_type];
+                data_byte = 0;
+                data_sym = 0;
+
+                break;
+            }
+
             memcpy(&data_buf[data_byte][data_sym * SCF_TONES], &sym_phase[rx_phase].demod_buf[rx_bin][demod_buf_idx][0], SCF_TONES);
 
             if (data_sym == SCF_FEC_LEN - 1) {

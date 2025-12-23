@@ -55,7 +55,7 @@ void scf_tx_init(float freq)
     carrier_freq = freq;
 }
 
-size_t scf_encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg, size_t msg_len)
+size_t scf_encode_packet(uint8_t *packet, uint8_t *msg, size_t msg_len)
 {
     size_t packet_type = -1;
     size_t msg_fec_len = 0;
@@ -69,7 +69,6 @@ size_t scf_encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg, size_
         }
     }
     assert(packet_type >= 0);
-    packet_type ^= 0xF0;
 
     uint8_t msg_fec[SCF_MSG_FEC_MAX];
     for (size_t i = 0; i < msg_len; i++) {
@@ -79,12 +78,7 @@ size_t scf_encode_packet(uint8_t *packet, uint8_t *preamble, uint8_t *msg, size_
 
     size_t pos = 0;
     for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        packet[pos] = preamble[i];
-        pos++;
-    }
-
-    for (size_t i = 0; i < SCF_HDR_LEN; i++) {
-        packet[pos] = scf_header_code[packet_type][i];
+        packet[pos] = scf_packet_sync_vector[packet_type][i];
         pos++;
     }
 

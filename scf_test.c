@@ -23,13 +23,12 @@
 #define START_OFFSET 20 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 
-#define PKT_LEN (SCF_PREAMBLE + SCF_HDR_LEN + SCF_FEC_LEN * MSG_FEC_LEN) /* symbols */
+#define PKT_LEN (SCF_PREAMBLE + SCF_FEC_LEN * MSG_FEC_LEN) /* symbols */
 #define RX_SIGNAL_LEN ((START_OFFSET + PKT_LEN + START_OFFSET) * SCF_SYM_LEN) /* samples */
 #define TX_SIGNAL_LEN (PKT_LEN * SCF_SYM_LEN) /* samples */
 
 gsl_rng *rng;
 
-uint8_t preamble[SCF_PREAMBLE];
 uint8_t tx_message[MSG_RAW_LEN];
 uint8_t tx_packet[SCF_PKT_MAX];
 float *tx_signal;
@@ -64,13 +63,6 @@ void generate_message(uint8_t *msg)
 {
     for (size_t i = 0; i < MSG_RAW_LEN; i++) {
         msg[i] = gsl_rng_get(rng);
-    }
-}
-
-void generate_preamble(uint8_t *preamble)
-{
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        preamble[i] = gsl_rng_get(rng) & 0x0F;
     }
 }
 
@@ -126,9 +118,8 @@ bool run_test(void)
 
     // TX
 
-    generate_preamble(preamble);
     generate_message(tx_message);
-    size_t pkt_len = scf_encode_packet(tx_packet, preamble, tx_message, MSG_RAW_LEN);
+    size_t pkt_len = scf_encode_packet(tx_packet, tx_message, MSG_RAW_LEN);
     assert(pkt_len == PKT_LEN);
 
     size_t tx_rand_delay = (gsl_rng_uniform(rng) + START_OFFSET) * SCF_SYM_LEN;
@@ -163,7 +154,7 @@ bool run_test(void)
 
     // RX
 
-    scf_rx_init(CARRIER_FREQ, preamble, verifier);
+    scf_rx_init(CARRIER_FREQ, verifier);
     unsigned int symbol_count = 0;
     bool message_is_decoded = false;
     size_t error_count = 0;
