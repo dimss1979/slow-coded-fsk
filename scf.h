@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define SCF_TONES 16
+#define SCF_TONES 200
 #define SCF_SRATE 8000 /* samples per second */
 #define SCF_SYM_LEN 1600 /* samples */
 #define SCF_PREAMBLE 40 /* symbols */

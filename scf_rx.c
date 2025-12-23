@@ -17,6 +17,7 @@
 #define FFT_RATIO 4
 #define CW_FILTER_LEN 10
 #define DEC_RATIO 4
+#define TONE_SPAN 8
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
 #define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
@@ -24,8 +25,8 @@
 
 struct sym_phase {
     complex float *source;
-    float cw_filter_buf[FFT_LEN][CW_FILTER_LEN];
-    uint8_t demod_buf[FFT_LEN][SCF_PKT_MAX][SCF_TONES];
+    uint8_t demod_buf[FFT_LEN][SCF_PKT_MAX];
+    uint8_t peak_buf[FFT_LEN][SCF_PKT_MAX];
 };
 
 typedef enum {
@@ -54,23 +55,8 @@ static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
 static uint32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
 static scf_msg_verifier data_verifier;
-static size_t cw_filter_idx;
 
 static bool initialized;
-
-static float cw_filter(float *cw_filter_buf, float x)
-{
-    cw_filter_buf[cw_filter_idx] = x;
-
-    float min = FLT_MAX;
-    for (size_t i = 0; i < CW_FILTER_LEN; i++) {
-        if (cw_filter_buf[i] < min) {
-            min = cw_filter_buf[i];
-        }
-    }
-
-    return x - min;
-}
 
 static void downconvert(float *signal)
 {
@@ -107,49 +93,42 @@ static void demodulate(struct sym_phase *c)
 
     fftwf_execute_dft(fft_plan, fft_buf, fft_buf);
 
-    float filtered_power[FFT_LEN];
+    float power[FFT_LEN];
 
-    for (size_t i = 0; i < FFT_LEN; i++) {
+    for (int i = 0; i < FFT_LEN; i++) {
         complex float bin = fft_buf[i];
-        float power = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
-        filtered_power[i] = cw_filter(&c->cw_filter_buf[i][0], power);
+        power[i] = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
     }
 
-    for (size_t i = 0; i < FFT_LEN; i++) {
-        float filtered_power_sum = 0.0f;
+    for (int i = 0; i < FFT_LEN; i++) {
+        float power_sum = 0.0f;
+        uint8_t is_local_peak = 1;
 
-        for (size_t j = 0; j < SCF_TONES; j++) {
-            size_t f = (i + j * FFT_RATIO) % FFT_LEN;
-            filtered_power_sum += filtered_power[f];
-        }
-        for (size_t j = 0; j < SCF_TONES; j++) {
-            size_t f = (i + j * FFT_RATIO) % FFT_LEN;
-            c->demod_buf[i][demod_buf_idx][j] = 255.0f * filtered_power[f] / filtered_power_sum;
-        }
+        for (int j = -TONE_SPAN; j < TONE_SPAN; j++) {
+            int n = (i + j * FFT_RATIO + FFT_LEN) % FFT_LEN;
+            power_sum += power[n];
 
-        if (i == rx_bin) {
-            uint8_t max_weight = 0;
-            for (size_t j = 0; j < SCF_TONES; j++) {
-                uint8_t weight = c->demod_buf[i][demod_buf_idx][j];
-                if (weight > max_weight) {
-                    max_weight = weight;
-                }
+            if (power[n] > power[i]) {
+                is_local_peak = 0;
             }
         }
+
+        c->demod_buf[i][demod_buf_idx] = 255.0f * power[i] / power_sum;
+        c->peak_buf[i][demod_buf_idx] = is_local_peak;
     }
 }
 
-static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *preamble_weight, uint32_t *preamble_symbols, size_t *preamble_bin)
+static void find_preamble(struct sym_phase *p, uint32_t *sync_vector, uint32_t *preamble_weight, uint32_t *preamble_symbols, size_t *preamble_bin)
 {
     uint32_t max_weight = 0;
     size_t max_bin = 0;
 
-    for (size_t b = 0; b < FFT_LEN; b += FFT_RATIO) {
+    for (int b = 0; b < FFT_LEN; b += FFT_RATIO) {
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-            uint8_t t = sync_vector[i];
+            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
             size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
-            weight += p->demod_buf[b][pos][t];
+            weight += p->demod_buf[t][pos];
         }
 
         if (weight > max_weight) {
@@ -164,9 +143,9 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
         size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-            uint8_t t = sync_vector[i];
+            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
             size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
-            weight += p->demod_buf[b_wrapped][pos][t];
+            weight += p->demod_buf[t][pos];
         }
 
         if (weight > max_weight) {
@@ -177,18 +156,10 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
 
     uint32_t decoded_count = 0;
     for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        size_t t = (max_bin + sync_vector[i] * FFT_RATIO) % FFT_LEN;
         size_t pos = (demod_buf_idx + i - SCF_PREAMBLE + SCF_PKT_MAX + 1) % SCF_PKT_MAX;
-        uint8_t weight_max = 0;
-        uint8_t symbol = 0;
-        for (size_t t = 0; t < SCF_TONES; t++) {
-            uint8_t weight =  p->demod_buf[max_bin][pos][t];
-            if (weight > weight_max) {
-                weight_max = weight;
-                symbol = t;
-            }
-        }
 
-        if (symbol == sync_vector[i]) {
+        if (p->peak_buf[t][pos]) {
             decoded_count++;
         }
     }
@@ -200,15 +171,15 @@ static void find_preamble(struct sym_phase *p, uint8_t *sync_vector, uint32_t *p
     }
 }
 
-static uint8_t ml_decode(uint32_t *weight, uint8_t *codeword, size_t codeword_size, uint8_t *code_table)
+static uint8_t ml_decode(uint32_t *weight, size_t *positions, size_t codeword_size, uint32_t *code_table)
 {
     uint32_t max_weight = 0;
     uint8_t max_symbol = 0;
     for (size_t i = 0; i < 256; i++) {
         uint32_t weight = 0;
         for (size_t s = 0; s < codeword_size; s++) {
-            size_t tone = code_table[i * codeword_size + s];
-            weight += codeword[SCF_TONES * s + tone];
+            size_t b = (rx_bin + FFT_RATIO * code_table[i * codeword_size + s]) % FFT_LEN;
+            weight += sym_phase[rx_phase].demod_buf[b][positions[s]];
         }
 
         if (weight > max_weight) {
@@ -356,8 +327,8 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         case S_PREAMBLE:
             if (preamble_found) {
                 printf(
-                    " +++ Preamble at %i match %u/%u, packet of %li bytes\n",
-                       symbol_counter, max_preamble_symbols,
+                    " +++ Preamble at %i weight %u bin %li phase %li match %u/%u, packet of %li bytes\n",
+                       symbol_counter, max_preamble_weight, max_preamble_bin, max_preamble_phase, max_preamble_symbols,
                        SCF_PREAMBLE, scf_packet_raw_len[packet_type]
                 );
                 last_preamble_weight = max_preamble_weight;
@@ -375,8 +346,8 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         case S_DATA:
             if (data_count == 0 && preamble_found && max_preamble_weight > last_preamble_weight) {
                 printf(
-                    " +++ Stronger preamble at %i match %u/%u, packet of %li bytes\n",
-                        symbol_counter, max_preamble_symbols,
+                    " +++ Stronger preamble at %i weight %u bin %li phase %li match %u/%u, packet of %li bytes\n",
+                        symbol_counter, max_preamble_weight, max_preamble_bin, max_preamble_phase, max_preamble_symbols,
                        SCF_PREAMBLE, scf_packet_raw_len[packet_type]
                 );
                 last_preamble_weight = max_preamble_weight;
@@ -394,16 +365,14 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
             if (data_count == SCF_FEC_LEN * data_fec_len) {
                 for (size_t i = 0; i < data_fec_len; i++) {
-                    uint8_t codeword[SCF_FEC_LEN][SCF_TONES];
+                    size_t positions[SCF_FEC_LEN];
                     for (size_t j = 0; j < SCF_FEC_LEN; j++) {
                         size_t pos = (demod_buf_idx - data_count + 1 + i + j * data_fec_len + SCF_PKT_MAX) % SCF_PKT_MAX;
-                        for (size_t t = 0; t < SCF_TONES; t++) {
-                            codeword[j][t] = sym_phase[rx_phase].demod_buf[rx_bin][pos][t];
-                        }
+                        positions[j] = pos;
                     }
 
                     uint32_t byte_weight;
-                    uint8_t byte_val = ml_decode(&byte_weight, &codeword[0][0], SCF_FEC_LEN, &scf_data_code[0][0]);
+                    uint8_t byte_val = ml_decode(&byte_weight, positions, SCF_FEC_LEN, &scf_data_code[0][0]);
                     data_fec_buf[i] = byte_val;
                     data_weight_buf[i] = byte_weight;
                 }
@@ -420,7 +389,6 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
 
     demod_buf_idx = (demod_buf_idx + 1) % SCF_PKT_MAX;
-    cw_filter_idx = (cw_filter_idx + 1) % CW_FILTER_LEN;
 
     symbol_counter++;
 

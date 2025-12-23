@@ -17,8 +17,8 @@ size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
     240,
 };
 void *scf_packet_rs_code[SCF_PACKET_TYPES];
-uint8_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_PREAMBLE];
-uint8_t scf_data_code[256][SCF_FEC_LEN];
+uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_PREAMBLE];
+uint32_t scf_data_code[256][SCF_FEC_LEN];
 uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
 
 static uint32_t xorshift32(uint32_t *state) {
@@ -31,11 +31,11 @@ static uint32_t xorshift32(uint32_t *state) {
     return x;
 }
 
-static void sync_init(uint8_t *sync_vector, uint32_t seed)
+static void sync_init(uint32_t *sync_vector, uint32_t seed)
 {
     uint32_t xorshift32_state = seed;
     for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        sync_vector[i] = xorshift32(&xorshift32_state) & 0x0F;
+        sync_vector[i] = xorshift32(&xorshift32_state) % SCF_TONES;
     }
 }
 
@@ -44,16 +44,12 @@ void scf_packet_init(void)
     if (initialized)
         return;
 
-    void *rs_data_code = init_rs_char(4, 0x13, 1, 1, SCF_FEC_LEN - 2, 15 - SCF_FEC_LEN);
-    assert(rs_data_code);
-
+    uint32_t xorshift32_state = 100500;
     for (size_t i = 0; i < 256; i++) {
-        scf_data_code[i][0] = (i >> 4) & 0x0F;
-        scf_data_code[i][1] = (i >> 0) & 0x0F;
-        encode_rs_char(rs_data_code, &scf_data_code[i][0], &scf_data_code[i][2]);
+        for (size_t j = 0; j < SCF_FEC_LEN; j++) {
+            scf_data_code[i][j] = xorshift32(&xorshift32_state) % SCF_TONES;
+        }
     }
-
-    free_rs_char(rs_data_code);
 
     for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
         scf_packet_rs_code[i] = init_rs_char(
@@ -66,7 +62,7 @@ void scf_packet_init(void)
         sync_init(&scf_packet_sync_vector[i][0], i + 12345);
     }
 
-    uint32_t xorshift32_state = 1;
+    xorshift32_state = 1;
     for (size_t i = 0; i < SCF_MSG_FEC_MAX; i++) {
         scf_data_scrambler[i] = xorshift32(&xorshift32_state);
     }

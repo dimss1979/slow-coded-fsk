@@ -55,7 +55,7 @@ void scf_tx_init(float freq)
     carrier_freq = freq;
 }
 
-size_t scf_encode_packet(uint8_t *packet, uint8_t *msg, size_t msg_len)
+size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
 {
     size_t packet_type = -1;
     size_t msg_fec_len = 0;
@@ -92,7 +92,7 @@ size_t scf_encode_packet(uint8_t *packet, uint8_t *msg, size_t msg_len)
     return pos;
 }
 
-void scf_tx(float *passband, uint8_t symbol, float gain)
+void scf_tx(float *passband, uint32_t symbol, float gain)
 {
     float freq = carrier_freq + freq_step * symbol;
 

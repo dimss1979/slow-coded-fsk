@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 void scf_tx_init(float freq);
-size_t scf_encode_packet(uint8_t *packet, uint8_t *msg, size_t msg_raw_len);
-void scf_tx(float *passband, uint8_t symbol, float gain);
+size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_raw_len);
+void scf_tx(float *passband, uint32_t symbol, float gain);
 
 #endif

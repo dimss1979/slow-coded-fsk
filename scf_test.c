@@ -30,7 +30,7 @@
 gsl_rng *rng;
 
 uint8_t tx_message[MSG_RAW_LEN];
-uint8_t tx_packet[SCF_PKT_MAX];
+uint32_t tx_packet[SCF_PKT_MAX];
 float *tx_signal;
 float *noise;
 float *rx_signal;
@@ -123,7 +123,7 @@ bool run_test(void)
     assert(pkt_len == PKT_LEN);
 
     size_t tx_rand_delay = (gsl_rng_uniform(rng) + START_OFFSET) * SCF_SYM_LEN;
-    float tx_rand_freq_offset = (gsl_rng_uniform(rng) - 0.5f) * 2.0f * 800.0f;
+    float tx_rand_freq_offset = (gsl_rng_uniform(rng) - 0.5f) * 2.0f * 100.0f - 500.0f;
 
     scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
     size_t signal_i = tx_rand_delay;
@@ -138,7 +138,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 11.0f);
+    add_awgn(noise, RX_SIGNAL_LEN, 10.8f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
