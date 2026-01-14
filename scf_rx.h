@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-void scf_rx_init(float freq, scf_msg_verifier verifier);
+void scf_rx_init(float freq);
 size_t scf_rx_symbol(uint8_t *msg, float *chip);
 
 #endif

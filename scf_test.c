@@ -36,6 +36,9 @@ float *noise;
 float *rx_signal;
 uint8_t rx_message[MSG_RAW_LEN];
 
+int wrong_len = 0;
+int wrong_msg = 0;
+
 uint64_t get_msec(void)
 {
     struct timespec ts;
@@ -104,14 +107,6 @@ float measure_power(float *signal, size_t len)
     return energy / (double) len;
 }
 
-bool verifier(uint8_t *msg, size_t msg_len)
-{
-    if (msg_len != MSG_RAW_LEN)
-        return false;
-
-    return !memcmp(msg, tx_message, msg_len);
-}
-
 bool run_test(void)
 {
     memset(noise, 0, RX_SIGNAL_LEN * sizeof(noise[0]));
@@ -138,7 +133,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 10.8f);
+    add_awgn(noise, RX_SIGNAL_LEN, 10.7f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
@@ -154,10 +149,9 @@ bool run_test(void)
 
     // RX
 
-    scf_rx_init(CARRIER_FREQ, verifier);
+    scf_rx_init(CARRIER_FREQ);
     unsigned int symbol_count = 0;
     bool message_is_decoded = false;
-    size_t error_count = 0;
     uint64_t decoder_time_start = get_msec();
 
     for (
@@ -167,21 +161,23 @@ bool run_test(void)
     ) {
         size_t received_message_len = scf_rx_symbol(rx_message, &rx_signal[i]);
         if (received_message_len) {
-            assert(received_message_len == MSG_RAW_LEN);
-            message_is_decoded = true;
-
-            for (size_t b = 0; b < MSG_RAW_LEN; b++) {
-                if (rx_message[b] != tx_message[b]) {
-                    message_is_decoded = false;
-                    error_count++;
-                }
+            if (received_message_len != MSG_RAW_LEN) {
+                printf(" !!! Wrong message length %li\n", received_message_len);
+                wrong_len++;
+                continue;
             }
+            if (memcmp(rx_message, tx_message, MSG_RAW_LEN)) {
+                printf(" !!! Wrong message\n");
+                wrong_len++;
+                continue;
+            }
+            message_is_decoded = true;
             break;
         }
     }
 
     uint64_t decoder_time = get_msec() - decoder_time_start;
-    printf("%s received with %li errors after %u symbols in %lu msec\n\n", message_is_decoded ? "    " : " NOT", error_count, symbol_count, decoder_time);
+    printf("%s received after %u symbols in %lu msec\n\n", message_is_decoded ? "    " : " NOT", symbol_count, decoder_time);
 
     return message_is_decoded;
 }
@@ -214,4 +210,6 @@ int main(int argc, char **argv)
     }
     float reception_probability = (float) decoded_message_cnt / (float) test_cnt;
     printf("Packet reception probability %f\n", reception_probability);
+    printf("Wrong message length: %i\n", wrong_len);
+    printf("Wrong message: %i\n", wrong_msg);
 }

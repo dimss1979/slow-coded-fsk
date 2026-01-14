@@ -54,7 +54,6 @@ static size_t data_count;
 static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
 static uint32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
-static scf_msg_verifier data_verifier;
 
 static bool initialized;
 
@@ -194,51 +193,15 @@ static uint8_t ml_decode(uint32_t *weight, size_t *positions, size_t codeword_si
 
 static bool msg_decode(uint8_t *msg)
 {
-    int eras_pos[SCF_MSG_FEC_MAX];
-    int eras_no_max = data_fec_len - data_raw_len;
-    int eras_mark[SCF_MSG_FEC_MAX] = {0};
+    int symbol_error_count = decode_rs_char(data_rs_code, data_fec_buf, NULL, 0);
 
-    for (size_t i = 0; i < eras_no_max; i++) {
-        uint32_t min_weight = UINT32_MAX;
-        int min_pos = 0;
-
-        for (size_t j = 0; j < data_fec_len; j++) {
-            if (!eras_mark[j] && data_weight_buf[j] < min_weight) {
-                min_weight = data_weight_buf[j];
-                min_pos = j;
-            }
+    if (symbol_error_count >= 0) {
+        for (size_t i = 0; i < data_raw_len; i++) {
+            data_fec_buf[i] ^= scf_data_scrambler[i];
         }
-
-        eras_mark[min_pos] = 1;
-        eras_pos[i] = min_pos;
-    }
-
-    for (size_t eras_no = 0; eras_no <= eras_no_max; eras_no += 2) {
-        int eras_pos_tmp[SCF_MSG_FEC_MAX];
-        memcpy(eras_pos_tmp, eras_pos, sizeof(eras_pos_tmp));
-
-        uint8_t rs_buf[SCF_MSG_FEC_MAX];
-        for (size_t i = 0; i < data_fec_len; i++) {
-            rs_buf[i] = data_fec_buf[i];
-        }
-
-        int symbol_error_count = decode_rs_char(
-            data_rs_code,
-            rs_buf,
-            eras_pos_tmp,
-            eras_no
-        );
-
-        if (symbol_error_count >= 0) {
-            for (size_t i = 0; i < data_raw_len; i++) {
-                rs_buf[i] ^= scf_data_scrambler[i];
-            }
-            if (data_verifier(rs_buf, data_raw_len)) {
-                printf(" +++ Outer FEC erasures: %li errors: %i\n", eras_no, symbol_error_count);
-                memcpy(msg, rs_buf, data_raw_len);
-                return true;
-            }
-        }
+        printf(" +++ Outer FEC errors: %i\n", symbol_error_count);
+        memcpy(msg, data_fec_buf, data_raw_len);
+        return true;
     }
 
     return false;
@@ -251,12 +214,11 @@ static void fft_window_init(void)
     }
 }
 
-void scf_rx_init(float freq, scf_msg_verifier verifier)
+void scf_rx_init(float freq)
 {
     state = S_PREAMBLE;
     symbol_counter = 0;
     carrier_freq = freq;
-    data_verifier = verifier;
 
     if (!initialized) {
         for (size_t i = 0; i < SYM_PHASES; i++) {

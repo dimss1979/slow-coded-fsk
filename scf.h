@@ -15,6 +15,4 @@
 
 #define SCF_PKT_MAX (SCF_PREAMBLE + SCF_FEC_LEN * SCF_MSG_FEC_MAX) /* symbols */
 
-typedef bool (*scf_msg_verifier)(uint8_t*, size_t);
-
 #endif
