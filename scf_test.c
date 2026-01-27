@@ -18,8 +18,8 @@
 #include "scf_rx.h"
 #include "scf_packet.h"
 
-#define MSG_RAW_LEN 100 /* bytes */
-#define MSG_FEC_LEN 120 /* bytes */
+#define MSG_RAW_LEN 107 /* bytes */
+#define MSG_FEC_LEN 129 /* bytes */
 #define START_OFFSET 20 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 

@@ -9,12 +9,12 @@
 static bool initialized = false;
 
 size_t scf_packet_raw_len[SCF_PACKET_TYPES] = {
-    100,
-    200,
+    7,
+    107,
 };
 size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
-    120,
-    240,
+    15,
+    129,
 };
 void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_PREAMBLE];
