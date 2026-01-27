@@ -54,7 +54,6 @@ static size_t data_raw_len;
 static size_t data_fec_len;
 static size_t data_count;
 static uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
-static uint32_t data_weight_buf[SCF_MSG_FEC_MAX];
 static void *data_rs_code;
 
 static bool initialized;
@@ -155,7 +154,7 @@ static void find_preamble(struct sym_phase *p, uint32_t *sync_vector, uint32_t *
     }
 }
 
-static uint8_t ml_decode(uint32_t *weight, size_t *positions, size_t codeword_size, uint32_t *code_table)
+static uint8_t ml_decode(size_t *positions, size_t codeword_size, uint32_t *code_table)
 {
     uint32_t max_weight = 0;
     uint8_t max_symbol = 0;
@@ -172,7 +171,6 @@ static uint8_t ml_decode(uint32_t *weight, size_t *positions, size_t codeword_si
         }
     }
 
-    *weight = max_weight;
     return max_symbol;
 }
 
@@ -314,10 +312,8 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                         positions[j] = pos;
                     }
 
-                    uint32_t byte_weight;
-                    uint8_t byte_val = ml_decode(&byte_weight, positions, SCF_FEC_LEN, &scf_data_code[0][0]);
+                    uint8_t byte_val = ml_decode(positions, SCF_FEC_LEN, &scf_data_code[0][0]);
                     data_fec_buf[i] = byte_val;
-                    data_weight_buf[i] = byte_weight;
                 }
 
                 if (msg_decode(msg)) {
