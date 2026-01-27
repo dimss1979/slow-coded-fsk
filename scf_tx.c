@@ -76,16 +76,25 @@ size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
     }
     encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
 
+    size_t block_len = (SCF_FEC_LEN * msg_fec_len) / SCF_PREAMBLE;
+    size_t first_block_len = block_len + (SCF_FEC_LEN * msg_fec_len) % SCF_PREAMBLE;
     size_t pos = 0;
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
-        packet[pos] = scf_packet_sync_vector[packet_type][i];
-        pos++;
-    }
+    size_t sync_cnt = first_block_len;
+    size_t sync_i = 0;
 
     for (size_t j = 0; j < SCF_FEC_LEN; j++) {
         for (size_t i = 0; i < msg_fec_len; i++) {
             packet[pos] = scf_data_code[msg_fec[i]][j];
             pos++;
+
+            sync_cnt--;
+
+            if (!sync_cnt) {
+                packet[pos] = scf_packet_sync_vector[packet_type][sync_i];
+                pos++;
+                sync_i++;
+                sync_cnt = block_len;
+            }
         }
     }
 
