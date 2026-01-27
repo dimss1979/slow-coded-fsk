@@ -76,8 +76,8 @@ size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
     }
     encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
 
-    size_t block_len = (SCF_FEC_LEN * msg_fec_len) / SCF_PREAMBLE;
-    size_t first_block_len = block_len + (SCF_FEC_LEN * msg_fec_len) % SCF_PREAMBLE;
+    size_t block_len = (SCF_FEC_LEN * msg_fec_len) / SCF_SYNC_LEN;
+    size_t first_block_len = block_len + (SCF_FEC_LEN * msg_fec_len) % SCF_SYNC_LEN;
     size_t pos = 0;
     size_t sync_cnt = first_block_len;
     size_t sync_i = 0;

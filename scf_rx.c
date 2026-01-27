@@ -19,12 +19,12 @@
 #define DEC_RATIO 4
 #define TONE_SPAN 8
 #define WEIGHT_SCALE (255.0f)
-#define PREAMBLE_RATIO (2.0f)
+#define sync_RATIO (2.0f)
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
 #define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
 #define FFT_LEN (BB_SYM_LEN * FFT_RATIO)
-#define PREAMBLE_THR (PREAMBLE_RATIO * SCF_PREAMBLE * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
+#define sync_THR (sync_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
 
 struct sym_phase {
     complex float *source;
@@ -99,18 +99,18 @@ static void demodulate(struct sym_phase *c)
     }
 }
 
-static void find_preamble(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, uint32_t *preamble_weight, size_t *preamble_bin)
+static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, uint32_t *sync_weight, size_t *sync_bin)
 {
     uint32_t max_weight = 0;
     size_t max_bin = 0;
 
-    size_t step = (SCF_FEC_LEN * packet_fec_len) / SCF_PREAMBLE + 1;
+    size_t step = (SCF_FEC_LEN * packet_fec_len) / SCF_SYNC_LEN + 1;
 
     for (int b = 0; b < FFT_LEN; b += FFT_RATIO) {
         uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
             size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
-            size_t pos = (demod_buf_idx + (i - SCF_PREAMBLE + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
+            size_t pos = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
             weight += p->demod_buf[t][pos];
         }
 
@@ -125,9 +125,9 @@ static void find_preamble(struct sym_phase *p, uint32_t *sync_vector, size_t pac
     for (size_t b = b0; b < b1; b++) {
         size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
             size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
-            size_t pos = (demod_buf_idx + (i - SCF_PREAMBLE + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
+            size_t pos = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
             weight += p->demod_buf[t][pos];
         }
 
@@ -137,9 +137,9 @@ static void find_preamble(struct sym_phase *p, uint32_t *sync_vector, size_t pac
         }
     }
 
-    if (max_weight > PREAMBLE_THR) {
-        *preamble_weight = max_weight;
-        *preamble_bin = max_bin;
+    if (max_weight > sync_THR) {
+        *sync_weight = max_weight;
+        *sync_bin = max_bin;
     }
 }
 
@@ -221,38 +221,38 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
     downconvert(signal);
 
-    uint32_t max_preamble_weight = 0;
-    size_t max_preamble_bin = 0;
-    size_t max_preamble_phase = 0;
+    uint32_t max_sync_weight = 0;
+    size_t max_sync_bin = 0;
+    size_t max_sync_phase = 0;
     size_t packet_type = 0;
 
     for (size_t i = 0; i < SYM_PHASES; i++) {
         demodulate(&sym_phase[i]);
 
         for (size_t pt = 0; pt < SCF_PACKET_TYPES; pt++) {
-            uint32_t preamble_weight = 0;
-            size_t preamble_bin = 0;
-            find_preamble(
+            uint32_t sync_weight = 0;
+            size_t sync_bin = 0;
+            find_sync(
                 &sym_phase[i],
                 &scf_packet_sync_vector[pt][0],
                 scf_packet_fec_len[pt],
-                &preamble_weight,
-                &preamble_bin
+                &sync_weight,
+                &sync_bin
             );
 
-            if (preamble_weight > max_preamble_weight) {
-                max_preamble_weight = preamble_weight;
-                max_preamble_bin = preamble_bin;
-                max_preamble_phase = i;
+            if (sync_weight > max_sync_weight) {
+                max_sync_weight = sync_weight;
+                max_sync_bin = sync_bin;
+                max_sync_phase = i;
                 packet_type = pt;
             }
         }
     }
 
-    if (max_preamble_weight > 0 && !symbol_skip) {
+    if (max_sync_weight > 0 && !symbol_skip) {
         printf(
-            " +++ Preamble at %i weight %u bin %li phase %li, packet of %li bytes\n",
-                symbol_counter, max_preamble_weight, max_preamble_bin, max_preamble_phase,
+            " +++ sync at %i weight %u bin %li phase %li, packet of %li bytes\n",
+                symbol_counter, max_sync_weight, max_sync_bin, max_sync_phase,
                 scf_packet_raw_len[packet_type]
         );
         size_t data_raw_len = scf_packet_raw_len[packet_type];
@@ -261,9 +261,9 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
         size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
 
-        size_t block_len = (SCF_FEC_LEN * data_fec_len) / SCF_PREAMBLE;
-        size_t first_block_len = block_len + (SCF_FEC_LEN * data_fec_len) % SCF_PREAMBLE;
-        size_t pos = (demod_buf_idx - (SCF_FEC_LEN * data_fec_len + SCF_PREAMBLE) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
+        size_t block_len = (SCF_FEC_LEN * data_fec_len) / SCF_SYNC_LEN;
+        size_t first_block_len = block_len + (SCF_FEC_LEN * data_fec_len) % SCF_SYNC_LEN;
+        size_t pos = (demod_buf_idx - (SCF_FEC_LEN * data_fec_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
         size_t sync_cnt = first_block_len;
         size_t data_cnt = 0;
 
@@ -287,8 +287,8 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         for (size_t i = 0; i < data_fec_len; i++) {
             uint8_t byte_val = ml_decode(
                 &positions[i][0],
-                max_preamble_phase,
-                max_preamble_bin,
+                max_sync_phase,
+                max_sync_bin,
                 SCF_FEC_LEN,
                 &scf_data_code[0][0]
             );

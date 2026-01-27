@@ -17,7 +17,7 @@ size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
     129,
 };
 void *scf_packet_rs_code[SCF_PACKET_TYPES];
-uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_PREAMBLE];
+uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_SYNC_LEN];
 uint32_t scf_data_code[256][SCF_FEC_LEN];
 uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
 
@@ -34,7 +34,7 @@ static uint32_t xorshift32(uint32_t *state) {
 static void sync_init(uint32_t *sync_vector, uint32_t seed)
 {
     uint32_t xorshift32_state = seed;
-    for (size_t i = 0; i < SCF_PREAMBLE; i++) {
+    for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
         sync_vector[i] = xorshift32(&xorshift32_state) % SCF_TONES;
     }
 }
