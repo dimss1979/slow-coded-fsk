@@ -10,6 +10,6 @@ extern uint32_t scf_packet_sync_vector[][SCF_SYNC_LEN];
 extern uint32_t scf_data_code[][SCF_FEC_LEN];
 extern uint8_t scf_data_scrambler[];
 
-void scf_packet_init(void);
+void scf_packet_init(uint64_t seed);
 
 #endif

@@ -113,6 +113,7 @@ bool run_test(void)
 
     // TX
 
+    scf_packet_init(gsl_rng_get(rng));
     generate_message(tx_message);
     size_t pkt_len = scf_encode_packet(tx_packet, tx_message, MSG_RAW_LEN);
     assert(pkt_len == PKT_LEN);
@@ -198,7 +199,6 @@ int main(int argc, char **argv)
         exit(1);
     }
     gsl_rng_set(rng, time(NULL));
-    scf_packet_init();
 
     unsigned int decoded_message_cnt = 0;
     const unsigned int test_cnt = 100;
