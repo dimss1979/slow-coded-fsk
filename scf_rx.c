@@ -19,12 +19,13 @@
 #define DEC_RATIO 4
 #define TONE_SPAN 8
 #define WEIGHT_SCALE (255.0f)
-#define SYNC_RATIO (2.0f)
+#define SYNC_RATIO (2.3f)
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
 #define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
 #define FFT_LEN (BB_SYM_LEN * FFT_RATIO)
 #define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
+#define SYNC_MAX (SCF_SYNC_LEN * WEIGHT_SCALE * 1.0f)
 
 struct sym_phase {
     complex float *source;
@@ -99,7 +100,7 @@ static void demodulate(struct sym_phase *c)
     }
 }
 
-static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, uint32_t *sync_weight, size_t *sync_bin)
+static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, float *sync_weight, size_t *sync_bin)
 {
     uint32_t max_weight = 0;
     size_t max_bin = 0;
@@ -138,7 +139,7 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
     }
 
     if (max_weight > SYNC_THR) {
-        *sync_weight = max_weight;
+        *sync_weight = (float) max_weight / SYNC_MAX;
         *sync_bin = max_bin;
     }
 }
@@ -221,7 +222,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
     downconvert(signal);
 
-    uint32_t max_sync_weight = 0;
+    float max_sync_weight = 0;
     size_t max_sync_bin = 0;
     size_t max_sync_phase = 0;
     size_t packet_type = 0;
@@ -230,7 +231,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         demodulate(&sym_phase[i]);
 
         for (size_t pt = 0; pt < SCF_PACKET_TYPES; pt++) {
-            uint32_t sync_weight = 0;
+            float sync_weight = 0;
             size_t sync_bin = 0;
             find_sync(
                 &sym_phase[i],
@@ -249,55 +250,58 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         }
     }
 
-    if (max_sync_weight > 0 && !symbol_skip) {
+    if (max_sync_weight > 0) {
         printf(
-            " +++ sync at %i weight %u bin %li phase %li, packet of %li bytes\n",
+            " +++ sync at %i weight %f bin %li phase %li, packet of %li bytes\n",
                 symbol_counter, max_sync_weight, max_sync_bin, max_sync_phase,
                 scf_packet_raw_len[packet_type]
         );
-        size_t data_raw_len = scf_packet_raw_len[packet_type];
-        size_t data_fec_len = scf_packet_fec_len[packet_type];
-        void *data_rs_code = scf_packet_rs_code[packet_type];
 
-        size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
+        if (!symbol_skip) {
+            size_t data_raw_len = scf_packet_raw_len[packet_type];
+            size_t data_fec_len = scf_packet_fec_len[packet_type];
+            void *data_rs_code = scf_packet_rs_code[packet_type];
 
-        size_t block_len = (SCF_FEC_LEN * data_fec_len) / SCF_SYNC_LEN;
-        size_t first_block_len = block_len + (SCF_FEC_LEN * data_fec_len) % SCF_SYNC_LEN;
-        size_t pos = (demod_buf_idx - (SCF_FEC_LEN * data_fec_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
-        size_t sync_cnt = first_block_len;
-        size_t data_cnt = 0;
+            size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
 
-        while (pos != demod_buf_idx) {
-            if (sync_cnt) {
-                size_t inner_i = data_cnt / data_fec_len;
-                size_t outer_i = data_cnt % data_fec_len;
+            size_t block_len = (SCF_FEC_LEN * data_fec_len) / SCF_SYNC_LEN;
+            size_t first_block_len = block_len + (SCF_FEC_LEN * data_fec_len) % SCF_SYNC_LEN;
+            size_t pos = (demod_buf_idx - (SCF_FEC_LEN * data_fec_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
+            size_t sync_cnt = first_block_len;
+            size_t data_cnt = 0;
 
-                positions[outer_i][inner_i] = pos;
-                data_cnt++;
-                sync_cnt--;
-            } else {
-                sync_cnt = block_len;
+            while (pos != demod_buf_idx) {
+                if (sync_cnt) {
+                    size_t inner_i = data_cnt / data_fec_len;
+                    size_t outer_i = data_cnt % data_fec_len;
+
+                    positions[outer_i][inner_i] = pos;
+                    data_cnt++;
+                    sync_cnt--;
+                } else {
+                    sync_cnt = block_len;
+                }
+
+                pos = (pos + 1) % SCF_PKT_MAX;
             }
 
-            pos = (pos + 1) % SCF_PKT_MAX;
-        }
+            uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
 
-        uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
+            for (size_t i = 0; i < data_fec_len; i++) {
+                uint8_t byte_val = ml_decode(
+                    &positions[i][0],
+                    max_sync_phase,
+                    max_sync_bin,
+                    SCF_FEC_LEN,
+                    &scf_data_code[0][0]
+                );
+                data_fec_buf[i] = byte_val;
+            }
 
-        for (size_t i = 0; i < data_fec_len; i++) {
-            uint8_t byte_val = ml_decode(
-                &positions[i][0],
-                max_sync_phase,
-                max_sync_bin,
-                SCF_FEC_LEN,
-                &scf_data_code[0][0]
-            );
-            data_fec_buf[i] = byte_val;
-        }
-
-        if (msg_decode(msg, data_fec_buf, data_rs_code, data_raw_len)) {
-            msg_len = data_raw_len;
-            symbol_skip = 5;
+            if (msg_decode(msg, data_fec_buf, data_rs_code, data_raw_len)) {
+                msg_len = data_raw_len;
+                symbol_skip = 5;
+            }
         }
     }
 

@@ -151,7 +151,6 @@ bool run_test(void)
     // RX
 
     scf_rx_init(CARRIER_FREQ);
-    unsigned int symbol_count = 0;
     bool message_is_decoded = false;
     uint64_t decoder_time_start = get_msec();
 
@@ -173,12 +172,11 @@ bool run_test(void)
                 continue;
             }
             message_is_decoded = true;
-            break;
         }
     }
 
     uint64_t decoder_time = get_msec() - decoder_time_start;
-    printf("%s received after %u symbols in %lu msec\n\n", message_is_decoded ? "    " : " NOT", symbol_count, decoder_time);
+    printf("%s received in %lu msec\n\n", message_is_decoded ? "    " : " NOT", decoder_time);
 
     return message_is_decoded;
 }
