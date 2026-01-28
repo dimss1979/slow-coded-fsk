@@ -19,12 +19,12 @@
 #define DEC_RATIO 4
 #define TONE_SPAN 8
 #define WEIGHT_SCALE (255.0f)
-#define sync_RATIO (2.0f)
+#define SYNC_RATIO (2.0f)
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
 #define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
 #define FFT_LEN (BB_SYM_LEN * FFT_RATIO)
-#define sync_THR (sync_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
+#define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
 
 struct sym_phase {
     complex float *source;
@@ -137,7 +137,7 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
         }
     }
 
-    if (max_weight > sync_THR) {
+    if (max_weight > SYNC_THR) {
         *sync_weight = max_weight;
         *sync_bin = max_bin;
     }
