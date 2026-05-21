@@ -14,7 +14,7 @@
 #define SCF_PACKET_TYPES 2 /* How many different lengths */
 #define SCF_MSG_FEC_MAX 255 /* bytes */
 
-#define SCF_PKT_MAX (SCF_SYNC_LEN + SCF_FEC_LEN * SCF_MSG_FEC_MAX) /* symbols */
+#define SCF_PKT_MAX (SCF_SYNC_LEN + SCF_FEC_LEN * SCF_MSG_FEC_MAX + 1) /* symbols */
 #define SCF_SYNC_LEN (5 * SCF_FEC_LEN)
 
 #endif

@@ -86,6 +86,9 @@ size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
     size_t sync_cnt = first_block_len;
     size_t sync_i = 0;
 
+    packet[pos] = 0;
+    pos++;
+
     for (size_t j = 0; j < SCF_FEC_LEN; j++) {
         for (size_t i = 0; i < msg_fec_len; i++) {
             packet[pos] = scf_data_code[msg_fec[i]][j];

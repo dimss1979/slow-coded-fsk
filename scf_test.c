@@ -23,7 +23,7 @@
 #define START_OFFSET 20 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 
-#define PKT_LEN (SCF_SYNC_LEN + SCF_FEC_LEN * MSG_FEC_LEN) /* symbols */
+#define PKT_LEN (SCF_SYNC_LEN + SCF_FEC_LEN * MSG_FEC_LEN + 1) /* symbols */
 #define RX_SIGNAL_LEN ((START_OFFSET + PKT_LEN + START_OFFSET) * SCF_SYM_LEN) /* samples */
 #define TX_SIGNAL_LEN (PKT_LEN * SCF_SYM_LEN) /* samples */
 
