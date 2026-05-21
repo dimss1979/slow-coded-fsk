@@ -124,7 +124,7 @@ bool run_test(void)
     scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
     size_t signal_i = tx_rand_delay;
     for (size_t i = 0; i < PKT_LEN; i++) {
-        scf_tx(&tx_signal[signal_i], tx_packet[i], 1.0f);
+        scf_tx(&tx_signal[signal_i], tx_packet[i], (float) SCF_DEC_RATIO);
         signal_i += SCF_SYM_LEN;
     }
     //dump_signal("dump_tx_signal.raw", tx_signal, RX_SIGNAL_LEN);
@@ -134,7 +134,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 10.7f);
+    add_awgn(noise, RX_SIGNAL_LEN, 10.6f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 

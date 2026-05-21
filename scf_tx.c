@@ -9,13 +9,14 @@
 #include "scf_packet.h"
 #include "scf_tx.h"
 
-#define MOD_FILTER_LEN (SCF_SYM_LEN / 10)
-#define MOD_FILTER_LEN_F ((float)SCF_SYM_LEN / 10)
+#define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 10)
+#define FREQ_STEP ((float)SCF_BB_SRATE / SCF_BB_SYM_LEN)
 
 static float carrier_freq;
 static float carrier_phase;
-static const float freq_step = (float) SCF_SRATE / SCF_SYM_LEN;
+static float baseband_phase;
 
+static complex float fir_tail[SCF_FIR_LEN_RF];
 static float mod_filter_buf[MOD_FILTER_LEN];
 static float mod_filter_kernel[MOD_FILTER_LEN];
 static size_t mod_filter_idx;
@@ -39,7 +40,9 @@ static void mod_filter_init(void)
     float dc_gain = 0.0f;
 
     for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
-        mod_filter_kernel[i] = sin(M_PI * i / MOD_FILTER_LEN_F);
+        int mod_filter_len_i = MOD_FILTER_LEN;
+        float mod_filter_len_f = (float) mod_filter_len_i;
+        mod_filter_kernel[i] = sinf((M_PI * i) / mod_filter_len_f);
         dc_gain += mod_filter_kernel[i];
     }
 
@@ -104,14 +107,32 @@ size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
 
 void scf_tx(float *passband, uint32_t symbol, float gain)
 {
-    float freq = carrier_freq + freq_step * symbol;
+    complex float baseband[SCF_SYM_LEN] = {0};
+    complex float baseband_filtered[SCF_SYM_LEN] = {0};
+
+    float freq = FREQ_STEP * symbol;
+
+    for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
+        baseband[i * SCF_DEC_RATIO] = gain * (complex float) (sinf(baseband_phase) + I * cosf(baseband_phase));
+
+        baseband_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_BB_SRATE);
+        while (baseband_phase > 2.0f * M_PI) {
+            baseband_phase -= 2.0f * M_PI;
+        }
+        while (baseband_phase < 2.0f * M_PI) {
+            baseband_phase += 2.0f * M_PI;
+        }
+    }
+
+    scf_filter_rf(baseband_filtered, baseband, fir_tail);
 
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        passband[i] = gain * sinf(carrier_phase);
-
-        carrier_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_SRATE);
+        carrier_phase += 2.0f * M_PI * carrier_freq * (1.0f / SCF_SRATE);
         while (carrier_phase > 2.0f * M_PI) {
             carrier_phase -= 2.0f * M_PI;
         }
+
+        complex float bb = baseband_filtered[i];
+        passband[i] = crealf(bb) * sinf(carrier_phase) - cimagf(bb) * cosf(carrier_phase);
     }
 }
