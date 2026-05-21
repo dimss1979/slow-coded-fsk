@@ -23,6 +23,7 @@
 
 #define BB_SRATE (SCF_SRATE / DEC_RATIO)
 #define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
+#define BB_SYM_LEN_F ((float)SCF_SYM_LEN / DEC_RATIO)
 #define FFT_LEN (BB_SYM_LEN * FFT_RATIO)
 #define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
 #define SYNC_MAX (SCF_SYNC_LEN * WEIGHT_SCALE * 1.0f)
@@ -183,7 +184,7 @@ static bool msg_decode(uint8_t *msg, uint8_t *data_fec_buf, void *data_rs_code, 
 static void fft_window_init(void)
 {
     for (size_t i = 0; i < BB_SYM_LEN; i++) {
-        fft_window[i] = sin(M_PI * i / BB_SYM_LEN);
+        fft_window[i] = sinf((M_PI * i) / BB_SYM_LEN_F);
     }
 }
 
