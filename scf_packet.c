@@ -2,6 +2,9 @@
 #include <fec.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <complex.h>
+#include <math.h>
+#include <fftw3.h>
 
 #include "scf.h"
 #include "scf_packet.h"
@@ -20,6 +23,7 @@ void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_SYNC_LEN];
 uint32_t scf_data_code[256][SCF_FEC_LEN];
 uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
+complex float scf_waveform[SCF_BB_SYM_LEN][SCF_BB_SYM_LEN];
 
 static uint64_t xorshift64(uint64_t *state) {
     uint64_t x = *state;
@@ -84,10 +88,55 @@ static void scf_packet_init_rs_code(void)
     rs_code_initialized = true;
 }
 
+void scf_waveform_init(uint64_t seed)
+{
+    fftwf_complex *fft_buf = fftwf_alloc_complex(SCF_BB_SYM_LEN);
+    assert(fft_buf);
+    fftwf_plan fft_plan = fftwf_plan_dft_1d(
+        SCF_BB_SYM_LEN,
+        fft_buf,
+        fft_buf,
+        FFTW_BACKWARD,
+        FFTW_ESTIMATE
+    );
+    assert(fft_plan);
+
+    uint64_t xorshift64_state = seed + 228264;
+    complex float primary_spectrum[SCF_BB_SYM_LEN];
+
+    for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
+        uint32_t random_number = xorshift64(&xorshift64_state);
+        float magnitude = (float) (random_number % 2);
+        float phase = (float) (random_number % 360) * M_PI / 180.0f;
+
+        primary_spectrum[i] = magnitude * (complex float) (sinf(phase) + I * cosf(phase));
+    }
+
+    for (size_t w = 0; w < SCF_BB_SYM_LEN; w++) {
+        for (size_t s = 0; s < SCF_BB_SYM_LEN; s++) {
+            fft_buf[s] = primary_spectrum[(s + w) % SCF_BB_SYM_LEN];
+        }
+        fft_buf[0] = 0.0f;
+
+        fftwf_execute(fft_plan);
+
+        float energy = 0.0f;
+        for (size_t s = 0; s < SCF_BB_SYM_LEN; s++) {
+            energy += fft_buf[s] * conjf(fft_buf[s]);
+        }
+        float rms = sqrtf(energy / SCF_BB_SYM_LEN);
+
+        for (size_t s = 0; s < SCF_BB_SYM_LEN; s++) {
+            scf_waveform[w][s] = fft_buf[s] / rms;
+        }
+    }
+}
+
 void scf_packet_init(uint64_t seed)
 {
     scf_packet_init_data_code(seed);
     scf_packet_init_sync_vector(seed);
     scf_packet_init_data_scrambler(seed);
     scf_packet_init_rs_code();
+    scf_waveform_init(seed);
 }

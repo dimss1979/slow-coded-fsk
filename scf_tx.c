@@ -14,47 +14,13 @@
 
 static float carrier_freq;
 static float carrier_phase;
-static float baseband_phase;
+static uint32_t waveform_idx = 0;
 
 static complex float fir_tail[SCF_FIR_LEN_RF];
-static float mod_filter_buf[MOD_FILTER_LEN];
-static float mod_filter_kernel[MOD_FILTER_LEN];
-static size_t mod_filter_idx;
-
-static float mod_filter(float x)
-{
-    mod_filter_buf[mod_filter_idx] = x;
-    mod_filter_idx = (mod_filter_idx + 1) % MOD_FILTER_LEN;
-
-    float y = 0.0f;
-    for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
-        size_t pos = (mod_filter_idx + i) % MOD_FILTER_LEN;
-        y += mod_filter_buf[pos] * mod_filter_kernel[i];
-    }
-
-    return y;
-}
-
-static void mod_filter_init(void)
-{
-    float dc_gain = 0.0f;
-
-    for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
-        int mod_filter_len_i = MOD_FILTER_LEN;
-        float mod_filter_len_f = (float) mod_filter_len_i;
-        mod_filter_kernel[i] = sinf((M_PI * i) / mod_filter_len_f);
-        dc_gain += mod_filter_kernel[i];
-    }
-
-    for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
-        mod_filter_kernel[i] /= dc_gain;
-    }
-}
 
 void scf_tx_init(float freq)
 {
     scf_filter_init();
-    mod_filter_init();
 
     carrier_freq = freq;
 }
@@ -110,23 +76,14 @@ size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len)
 
 void scf_tx(float *passband, uint32_t symbol, float gain)
 {
+    waveform_idx = (waveform_idx + 1 + symbol) % SCF_BB_SYM_LEN;
+
     complex float baseband[SCF_SYM_LEN] = {0};
-    complex float baseband_filtered[SCF_SYM_LEN] = {0};
-
-    float freq = FREQ_STEP * ((float) symbol + 0.5f - (float) SCF_TONES / 2.0f);
-
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
-        baseband[i * SCF_DEC_RATIO] = gain * (complex float) (sinf(baseband_phase) + I * cosf(baseband_phase));
-
-        baseband_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_BB_SRATE);
-        while (baseband_phase > 2.0f * M_PI) {
-            baseband_phase -= 2.0f * M_PI;
-        }
-        while (baseband_phase < 2.0f * M_PI) {
-            baseband_phase += 2.0f * M_PI;
-        }
+        baseband[i * SCF_DEC_RATIO] = gain * scf_waveform[waveform_idx][i];
     }
 
+    complex float baseband_filtered[SCF_SYM_LEN] = {0};
     scf_filter_rf(baseband_filtered, baseband, fir_tail);
 
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {

@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define SCF_TONES 200
 #define SCF_BB_SRATE 2000 /* samples per second */
 #define SCF_BB_SYM_LEN 400 /* samples */
+#define SCF_TONES (SCF_BB_SYM_LEN - 1)
 #define SCF_DEC_RATIO 4
 #define SCF_SRATE (SCF_BB_SRATE * SCF_DEC_RATIO)
 #define SCF_SYM_LEN (SCF_BB_SYM_LEN * SCF_DEC_RATIO)
