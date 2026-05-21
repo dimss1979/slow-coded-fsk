@@ -139,7 +139,7 @@ bool run_test(void)
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
     float snr = 10.0f * log10f(signal_power / noise_power);
-    const float user_bitrate = (8.0f * MSG_RAW_LEN) / (PKT_LEN * SCF_SYM_LEN / SCF_SRATE);
+    const float user_bitrate = (8.0f * MSG_RAW_LEN * SCF_SRATE) / ((float)PKT_LEN * SCF_SYM_LEN);
     float channel_bandwidth = (float) SCF_SRATE / 2.0f;
     float ebno = snr - 10.0f * log10f(user_bitrate / channel_bandwidth);
     printf(" snr: %f dB\n", snr);

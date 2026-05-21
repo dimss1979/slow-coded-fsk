@@ -1,6 +1,7 @@
 #ifndef __SCF_RX_H
 #define __SCF_RX_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 void scf_rx_init(float freq);

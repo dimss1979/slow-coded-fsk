@@ -6,6 +6,6 @@
 #define SCF_FIR_LEN_RF 185 /* taps */
 
 void scf_filter_init(void);
-void scf_filter_rf(complex float *out, complex float *in, complex float *tail);
+void scf_filter_rf(float _Complex *out, float _Complex *in, float _Complex *tail);
 
 #endif

@@ -10,6 +10,7 @@
 #include "scf_tx.h"
 
 #define MOD_FILTER_LEN (SCF_SYM_LEN / 10)
+#define MOD_FILTER_LEN_F ((float)SCF_SYM_LEN / 10)
 
 static float carrier_freq;
 static float carrier_phase;
@@ -38,7 +39,7 @@ static void mod_filter_init(void)
     float dc_gain = 0.0f;
 
     for (size_t i = 0; i < MOD_FILTER_LEN; i++) {
-        mod_filter_kernel[i] = sin(M_PI * i / MOD_FILTER_LEN);
+        mod_filter_kernel[i] = sin(M_PI * i / MOD_FILTER_LEN_F);
         dc_gain += mod_filter_kernel[i];
     }
 

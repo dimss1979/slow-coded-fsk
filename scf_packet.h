@@ -1,7 +1,10 @@
 #ifndef __SCF_PACKET_H
 #define __SCF_PACKET_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include "scf.h"
 
 extern size_t scf_packet_raw_len[];
 extern size_t scf_packet_fec_len[];
