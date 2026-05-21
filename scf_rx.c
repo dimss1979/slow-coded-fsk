@@ -15,16 +15,11 @@
 
 #define SYM_PHASES 4
 #define FFT_RATIO 4
-#define CW_FILTER_LEN 10
-#define DEC_RATIO 4
 #define TONE_SPAN 8
 #define WEIGHT_SCALE (255.0f)
 #define SYNC_RATIO (2.3f)
 
-#define BB_SRATE (SCF_SRATE / DEC_RATIO)
-#define BB_SYM_LEN (SCF_SYM_LEN / DEC_RATIO)
-#define BB_SYM_LEN_F ((float)SCF_SYM_LEN / DEC_RATIO)
-#define FFT_LEN (BB_SYM_LEN * FFT_RATIO)
+#define FFT_LEN (SCF_BB_SYM_LEN * FFT_RATIO)
 #define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
 #define SYNC_MAX (SCF_SYNC_LEN * WEIGHT_SCALE * 1.0f)
 
@@ -36,11 +31,11 @@ struct sym_phase {
 static struct sym_phase sym_phase[SYM_PHASES];
 static fftwf_plan fft_plan;
 static fftwf_complex *fft_buf;
-static complex float input_signal[BB_SYM_LEN * 2];
+static complex float input_signal[SCF_BB_SYM_LEN * 2];
 static float carrier_freq;
 static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
-static float fft_window[BB_SYM_LEN];
+static float fft_window[SCF_BB_SYM_LEN];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static unsigned int symbol_skip;
@@ -49,7 +44,7 @@ static bool initialized;
 
 static void downconvert(float *signal)
 {
-    memcpy(&input_signal[0], &input_signal[BB_SYM_LEN], BB_SYM_LEN * sizeof(input_signal[0]));
+    memcpy(&input_signal[0], &input_signal[SCF_BB_SYM_LEN], SCF_BB_SYM_LEN * sizeof(input_signal[0]));
 
     complex float baseband[SCF_SYM_LEN];
     complex float baseband_filtered[SCF_SYM_LEN];
@@ -64,15 +59,15 @@ static void downconvert(float *signal)
         }
     }
     scf_filter_rf(baseband_filtered, baseband, fir_tail);
-    for (size_t i = 0; i < BB_SYM_LEN; i++) {
-        input_signal[BB_SYM_LEN + i] = baseband_filtered[i * DEC_RATIO];
+    for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
+        input_signal[SCF_BB_SYM_LEN + i] = baseband_filtered[i * SCF_DEC_RATIO];
     }
 }
 
 static void demodulate(struct sym_phase *c)
 {
     for (size_t i = 0; i < FFT_LEN; i++) {
-        if (i < BB_SYM_LEN) {
+        if (i < SCF_BB_SYM_LEN) {
             fft_buf[i] = c->source[i];
             fft_buf[i] *= fft_window[i];
         } else {
@@ -183,8 +178,8 @@ static bool msg_decode(uint8_t *msg, uint8_t *data_fec_buf, void *data_rs_code, 
 
 static void fft_window_init(void)
 {
-    for (size_t i = 0; i < BB_SYM_LEN; i++) {
-        fft_window[i] = sinf((M_PI * i) / BB_SYM_LEN_F);
+    for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
+        fft_window[i] = sinf((M_PI * i) / SCF_BB_SYM_LEN);
     }
 }
 
@@ -196,7 +191,7 @@ void scf_rx_init(float freq)
 
     if (!initialized) {
         for (size_t i = 0; i < SYM_PHASES; i++) {
-            sym_phase[i].source = &input_signal[BB_SYM_LEN - i * BB_SYM_LEN / SYM_PHASES];
+            sym_phase[i].source = &input_signal[SCF_BB_SYM_LEN - i * SCF_BB_SYM_LEN / SYM_PHASES];
         }
 
         fft_buf = fftwf_alloc_complex(FFT_LEN);
