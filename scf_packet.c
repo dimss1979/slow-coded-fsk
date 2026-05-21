@@ -35,29 +35,42 @@ static uint64_t xorshift64(uint64_t *state) {
     return x;
 }
 
-void scf_packet_init(uint64_t seed)
+static void scf_packet_init_data_code(uint64_t seed)
 {
     uint64_t xorshift64_state = seed + 1000;
+
     for (size_t i = 0; i < 256; i++) {
         for (size_t j = 0; j < SCF_FEC_LEN; j++) {
             scf_data_code[i][j] = xorshift64(&xorshift64_state) % SCF_TONES;
         }
     }
+}
 
-    xorshift64_state = seed + 2000;
+static void scf_packet_init_sync_vector(uint64_t seed)
+{
+    uint64_t xorshift64_state = seed + 2000;
+
     for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
         for (size_t j = 0; j < SCF_SYNC_LEN; j++) {
             scf_packet_sync_vector[i][j] = xorshift64(&xorshift64_state) % SCF_TONES;
         }
     }
+}
 
-    xorshift64_state = seed + 3000;
+static void scf_packet_init_data_scrambler(uint64_t seed)
+{
+    uint64_t xorshift64_state = seed + 3000;
+
     for (size_t i = 0; i < SCF_MSG_FEC_MAX; i++) {
         scf_data_scrambler[i] = xorshift64(&xorshift64_state);
     }
+}
 
-    if (rs_code_initialized)
+static void scf_packet_init_rs_code(void)
+{
+    if (rs_code_initialized) {
         return;
+    }
 
     for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
         scf_packet_rs_code[i] = init_rs_char(
@@ -69,4 +82,12 @@ void scf_packet_init(uint64_t seed)
     }
 
     rs_code_initialized = true;
+}
+
+void scf_packet_init(uint64_t seed)
+{
+    scf_packet_init_data_code(seed);
+    scf_packet_init_sync_vector(seed);
+    scf_packet_init_data_scrambler(seed);
+    scf_packet_init_rs_code();
 }
