@@ -110,7 +110,7 @@ void scf_tx(float *passband, uint32_t symbol, float gain)
     complex float baseband[SCF_SYM_LEN] = {0};
     complex float baseband_filtered[SCF_SYM_LEN] = {0};
 
-    float freq = FREQ_STEP * symbol;
+    float freq = FREQ_STEP * ((float) symbol + 0.5f - (float) SCF_TONES / 2.0f);
 
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
         baseband[i * SCF_DEC_RATIO] = gain * (complex float) (sinf(baseband_phase) + I * cosf(baseband_phase));

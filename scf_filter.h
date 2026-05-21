@@ -3,7 +3,7 @@
 
 #include <complex.h>
 
-#define SCF_FIR_LEN_RF 185 /* taps */
+#define SCF_FIR_LEN_RF 369 /* taps */
 
 void scf_filter_init(void);
 void scf_filter_rf(float _Complex *out, float _Complex *in, float _Complex *tail);
