@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "scf.h"
-#include "scf_filter.h"
 
 #define FIR_FFT_LEN 2048
 

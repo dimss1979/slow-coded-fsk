@@ -1,3 +1,4 @@
+#include <complex.h>
 #include <math.h>
 #include <stddef.h>
 #include <assert.h>
@@ -5,9 +6,6 @@
 #include <fec.h>
 
 #include "scf.h"
-#include "scf_filter.h"
-#include "scf_packet.h"
-#include "scf_tx.h"
 
 #define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 20)
 #define FREQ_STEP ((float)SCF_BB_SRATE / SCF_BB_SYM_LEN)
@@ -53,7 +51,6 @@ static void mod_filter_init(void)
 
 void scf_tx_init(float freq)
 {
-    scf_filter_init();
     mod_filter_init();
 
     carrier_freq = freq;

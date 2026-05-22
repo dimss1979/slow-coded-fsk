@@ -9,9 +9,6 @@
 #include <fec.h>
 
 #include "scf.h"
-#include "scf_filter.h"
-#include "scf_packet.h"
-#include "scf_rx.h"
 
 #define SYM_PHASES 4
 #define FFT_RATIO 4

@@ -13,10 +13,6 @@
 #include <stdbool.h>
 
 #include "scf.h"
-#include "scf_filter.h"
-#include "scf_tx.h"
-#include "scf_rx.h"
-#include "scf_packet.h"
 
 #define MSG_RAW_LEN 107 /* bytes */
 #define MSG_FEC_LEN 129 /* bytes */

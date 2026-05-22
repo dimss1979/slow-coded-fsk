@@ -4,7 +4,6 @@
 #include <stdbool.h>
 
 #include "scf.h"
-#include "scf_packet.h"
 
 static bool rs_code_initialized = false;
 
@@ -37,6 +36,8 @@ static uint64_t xorshift64(uint64_t *state) {
 
 void scf_packet_init(uint64_t seed)
 {
+    scf_filter_init();
+
     uint64_t xorshift64_state = seed + 1000;
     for (size_t i = 0; i < 256; i++) {
         for (size_t j = 0; j < SCF_FEC_LEN; j++) {
