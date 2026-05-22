@@ -285,7 +285,7 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
                     max_sync_phase,
                     max_sync_bin,
                     SCF_FEC_LEN,
-                    &scf_data_code[0][0]
+                    &scf_inner_code[0][0]
                 );
                 data_fec_buf[i] = byte_val;
             }

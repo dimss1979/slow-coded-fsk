@@ -19,7 +19,7 @@ size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
 };
 static void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_SYNC_LEN];
-uint32_t scf_data_code[256][SCF_FEC_LEN];
+uint32_t scf_inner_code[256][SCF_FEC_LEN];
 uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
 
 static uint64_t xorshift64(uint64_t *state) {
@@ -43,7 +43,7 @@ void scf_packet_init(uint64_t seed)
     uint64_t xorshift64_state = seed + 1000;
     for (size_t i = 0; i < 256; i++) {
         for (size_t j = 0; j < SCF_FEC_LEN; j++) {
-            scf_data_code[i][j] = xorshift64(&xorshift64_state) % SCF_TONES;
+            scf_inner_code[i][j] = xorshift64(&xorshift64_state) % SCF_TONES;
         }
     }
 
@@ -103,7 +103,7 @@ size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len)
 
     for (size_t j = 0; j < SCF_FEC_LEN; j++) {
         for (size_t i = 0; i < msg_fec_len; i++) {
-            packet[pos] = scf_data_code[msg_fec[i]][j];
+            packet[pos] = scf_inner_code[msg_fec[i]][j];
             pos++;
 
             sync_cnt--;
