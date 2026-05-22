@@ -247,11 +247,11 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
         printf(
             " +++ sync at %i weight %f bin %li phase %li, packet of %li bytes\n",
                 symbol_counter, max_sync_weight, max_sync_bin, max_sync_phase,
-                scf_packet_raw_len[packet_type]
+                scf_packet_user_len[packet_type]
         );
 
         if (!symbol_skip) {
-            size_t data_raw_len = scf_packet_raw_len[packet_type];
+            size_t data_raw_len = scf_packet_user_len[packet_type];
             size_t data_fec_len = scf_packet_fec_len[packet_type];
 
             size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
