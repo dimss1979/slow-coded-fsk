@@ -155,14 +155,23 @@ bool run_test(void)
         i < RX_SIGNAL_LEN - SCF_SYM_LEN;
         i += SCF_SYM_LEN
     ) {
-        size_t received_message_len = scf_rx(rx_message, &rx_signal[i]);
-        if (received_message_len) {
-            if (received_message_len != MSG_RAW_LEN) {
-                printf(" !!! Wrong message length %li\n", received_message_len);
+        scf_rx_result result;
+        scf_rx(&result, &rx_signal[i]);
+
+        if (result.got_sync) {
+            printf(" +++ Sync at %li weight %f cfo %f phase %li, packet type %li\n",
+                result.symbol_counter, result.sync_weight, result.sync_cfo, result.sync_phase,
+                result.sync_packet_type
+            );
+        }
+
+        if (result.got_msg) {
+            if (result.msg_len != MSG_RAW_LEN) {
+                printf(" !!! Wrong message length %li\n", result.msg_len);
                 wrong_len++;
                 continue;
             }
-            if (memcmp(rx_message, tx_message, MSG_RAW_LEN)) {
+            if (memcmp(result.msg, tx_message, MSG_RAW_LEN)) {
                 printf(" !!! Wrong message\n");
                 wrong_len++;
                 continue;

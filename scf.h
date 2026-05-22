@@ -23,6 +23,20 @@
 #define SCF_PKT_MAX (SCF_SYNC_LEN + SCF_FEC_LEN * SCF_MSG_FEC_MAX) /* FSK packet length in symbols */
 #define SCF_SYNC_LEN (5 * SCF_FEC_LEN) /* Sync vector length in symbols */
 
+typedef struct _scf_rx_result {
+    size_t symbol_counter;
+
+    bool got_sync;
+    size_t sync_phase;
+    size_t sync_packet_type;
+    float sync_cfo;
+    float sync_weight;
+
+    bool got_msg;
+    uint8_t msg[SCF_MSG_FEC_MAX];
+    size_t msg_len;
+    unsigned int outer_fec_errors;
+} scf_rx_result;
 
 /* Always call in the beginning of the program
  * before any other SCF functions. It initializes
@@ -44,8 +58,8 @@ size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len);
 void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain);
 
 /* RX: decode a message from a passband FSK signal */
-/* Returns the length of the decoded message when it's fully received, 0 otherwise */
+/* The result structure is filled according to decoding outcome */
 /* Call repeatedly for each passband signal portion of an FSK symbol length */
-size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN]);
+void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN]);
 
 #endif

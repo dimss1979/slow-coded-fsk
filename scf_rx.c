@@ -35,8 +35,13 @@ static float fft_window[SCF_BB_SYM_LEN];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static unsigned int symbol_skip;
-static int cfo_bin_min;
-static int cfo_bin_max;
+
+static const float cfo_step = (float) SCF_BB_SRATE / (float) FFT_LEN;
+static const float cfo_low_tone = -((float) SCF_BB_SRATE / (float) SCF_BB_SYM_LEN) * ((float) (SCF_TONES - 1) / 2.0f);
+static const float cfo_freq_min = cfo_low_tone - MAX_CFO;
+static const float cfo_freq_max = cfo_low_tone + MAX_CFO;
+static const int cfo_bin_min = (int) (cfo_freq_min / cfo_step);
+static const int cfo_bin_max = (int) (cfo_freq_max / cfo_step);
 
 static bool initialized;
 
@@ -193,25 +198,12 @@ void scf_rx_init(float freq)
 
         initialized = true;
     }
-
-    {
-        float cfo_step = (float) SCF_BB_SRATE / (float) FFT_LEN;
-        float low_tone = -((float) SCF_BB_SRATE / (float) SCF_BB_SYM_LEN) * (float) SCF_TONES / 2.0f;
-
-        float freq_min = low_tone - MAX_CFO;
-        float freq_max = low_tone + MAX_CFO;
-
-        int bin_min = (int) (freq_min / cfo_step);
-        int bin_max = (int) (freq_max / cfo_step);
-
-        cfo_bin_min = bin_min;
-        cfo_bin_max = bin_max;
-    }
 }
 
-size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
+void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
 {
-    size_t msg_len = 0;
+    memset(result, 0, sizeof(scf_rx_result));
+    result->symbol_counter = symbol_counter;
 
     downconvert(signal);
 
@@ -244,28 +236,31 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
     }
 
     if (max_sync_weight > 0) {
-        printf(
-            " +++ sync at %i weight %f bin %li phase %li, packet of %li bytes\n",
-                symbol_counter, max_sync_weight, max_sync_bin, max_sync_phase,
-                scf_packet_user_len[packet_type]
-        );
+
+        int sync_bin_shifted = max_sync_bin > FFT_LEN / 2 ? max_sync_bin - FFT_LEN : max_sync_bin;
+        float sync_cfo = sync_bin_shifted * cfo_step - cfo_low_tone;
+
+        result->got_sync = true;
+        result->sync_phase = max_sync_phase;
+        result->sync_packet_type = packet_type;
+        result->sync_cfo = sync_cfo;
+        result->sync_weight = max_sync_weight;
 
         if (!symbol_skip) {
-            size_t data_raw_len = scf_packet_user_len[packet_type];
-            size_t data_fec_len = scf_packet_fec_len[packet_type];
+            size_t outer_codeword_len = scf_packet_fec_len[packet_type];
 
             size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
 
-            size_t block_len = (SCF_FEC_LEN * data_fec_len) / SCF_SYNC_LEN;
-            size_t first_block_len = block_len + (SCF_FEC_LEN * data_fec_len) % SCF_SYNC_LEN;
-            size_t pos = (demod_buf_idx - (SCF_FEC_LEN * data_fec_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
+            size_t block_len = (SCF_FEC_LEN * outer_codeword_len) / SCF_SYNC_LEN;
+            size_t first_block_len = block_len + (SCF_FEC_LEN * outer_codeword_len) % SCF_SYNC_LEN;
+            size_t pos = (demod_buf_idx - (SCF_FEC_LEN * outer_codeword_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
             size_t sync_cnt = first_block_len;
             size_t data_cnt = 0;
 
             while (pos != demod_buf_idx) {
                 if (sync_cnt) {
-                    size_t inner_i = data_cnt / data_fec_len;
-                    size_t outer_i = data_cnt % data_fec_len;
+                    size_t inner_i = data_cnt / outer_codeword_len;
+                    size_t outer_i = data_cnt % outer_codeword_len;
 
                     positions[outer_i][inner_i] = pos;
                     data_cnt++;
@@ -277,9 +272,9 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
                 pos = (pos + 1) % SCF_PKT_MAX;
             }
 
-            uint8_t data_fec_buf[SCF_MSG_FEC_MAX];
+            uint8_t outer_codeword[SCF_MSG_FEC_MAX];
 
-            for (size_t i = 0; i < data_fec_len; i++) {
+            for (size_t i = 0; i < outer_codeword_len; i++) {
                 uint8_t byte_val = ml_decode(
                     &positions[i][0],
                     max_sync_phase,
@@ -287,11 +282,10 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
                     SCF_FEC_LEN,
                     &scf_inner_code[0][0]
                 );
-                data_fec_buf[i] = byte_val;
+                outer_codeword[i] = byte_val;
             }
 
-            if (scf_packet_decode(msg, data_fec_buf, packet_type)) {
-                msg_len = data_raw_len;
+            if (scf_packet_decode(result, outer_codeword)) {
                 symbol_skip = 5;
             }
         }
@@ -303,6 +297,4 @@ size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
     if (symbol_skip) {
         symbol_skip--;
     }
-
-    return msg_len;
 }

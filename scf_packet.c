@@ -127,19 +127,24 @@ size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len)
     return pos;
 }
 
-bool scf_packet_decode(uint8_t *msg, uint8_t *data_fec_buf, size_t packet_type)
+bool scf_packet_decode(scf_rx_result *result, uint8_t *outer_codeword)
 {
+    size_t packet_type = result->sync_packet_type;
     assert(packet_type < SCF_PACKET_TYPES);
 
-    size_t data_raw_len = scf_packet_user_len[packet_type];
-    int symbol_error_count = decode_rs_char(scf_packet_rs_code[packet_type], data_fec_buf, NULL, 0);
+    size_t msg_len = scf_packet_user_len[packet_type];
+    int symbol_error_count = decode_rs_char(scf_packet_rs_code[packet_type], outer_codeword, NULL, 0);
 
     if (symbol_error_count >= 0) {
-        for (size_t i = 0; i < data_raw_len; i++) {
-            data_fec_buf[i] ^= scf_data_scrambler[i];
+        for (size_t i = 0; i < msg_len; i++) {
+            outer_codeword[i] ^= scf_data_scrambler[i];
         }
-        printf(" +++ Outer FEC errors: %i\n", symbol_error_count);
-        memcpy(msg, data_fec_buf, data_raw_len);
+
+        memcpy(result->msg, outer_codeword, msg_len);
+        result->msg_len = msg_len;
+        result->outer_fec_errors = symbol_error_count;
+        result->got_msg = true;
+
         return true;
     }
 
