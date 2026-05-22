@@ -9,7 +9,7 @@
 #include "scf_packet.h"
 #include "scf_tx.h"
 
-#define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 10)
+#define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 20)
 #define FREQ_STEP ((float)SCF_BB_SRATE / SCF_BB_SYM_LEN)
 
 static float carrier_freq;
