@@ -155,7 +155,7 @@ bool run_test(void)
         i < RX_SIGNAL_LEN - SCF_SYM_LEN;
         i += SCF_SYM_LEN
     ) {
-        size_t received_message_len = scf_rx_symbol(rx_message, &rx_signal[i]);
+        size_t received_message_len = scf_rx(rx_message, &rx_signal[i]);
         if (received_message_len) {
             if (received_message_len != MSG_RAW_LEN) {
                 printf(" !!! Wrong message length %li\n", received_message_len);

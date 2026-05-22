@@ -209,7 +209,7 @@ void scf_rx_init(float freq)
     }
 }
 
-size_t scf_rx_symbol(uint8_t *msg, float *signal)
+size_t scf_rx(uint8_t *msg, float signal[SCF_SYM_LEN])
 {
     size_t msg_len = 0;
 

@@ -54,7 +54,7 @@ void scf_tx_init(float freq)
     carrier_freq = freq;
 }
 
-void scf_tx(float *passband, uint32_t symbol, float gain)
+void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain)
 {
     complex float baseband[SCF_SYM_LEN] = {0};
     complex float baseband_filtered[SCF_SYM_LEN] = {0};
@@ -82,6 +82,6 @@ void scf_tx(float *passband, uint32_t symbol, float gain)
         }
 
         complex float bb = baseband_filtered[i];
-        passband[i] = crealf(bb) * sinf(carrier_phase) - cimagf(bb) * cosf(carrier_phase);
+        signal[i] = crealf(bb) * sinf(carrier_phase) - cimagf(bb) * cosf(carrier_phase);
     }
 }
