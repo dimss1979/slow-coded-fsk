@@ -6,8 +6,6 @@
 #include <math.h>
 #include <float.h>
 #include <stdbool.h>
-#include <fec.h>
-
 #include "scf_private.h"
 
 #define SYM_PHASES 4
@@ -161,22 +159,6 @@ static uint8_t ml_decode(size_t *positions, size_t phase, size_t bin, size_t cod
     return max_symbol;
 }
 
-static bool msg_decode(uint8_t *msg, uint8_t *data_fec_buf, void *data_rs_code, size_t data_raw_len)
-{
-    int symbol_error_count = decode_rs_char(data_rs_code, data_fec_buf, NULL, 0);
-
-    if (symbol_error_count >= 0) {
-        for (size_t i = 0; i < data_raw_len; i++) {
-            data_fec_buf[i] ^= scf_data_scrambler[i];
-        }
-        printf(" +++ Outer FEC errors: %i\n", symbol_error_count);
-        memcpy(msg, data_fec_buf, data_raw_len);
-        return true;
-    }
-
-    return false;
-}
-
 static void fft_window_init(void)
 {
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
@@ -271,7 +253,6 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         if (!symbol_skip) {
             size_t data_raw_len = scf_packet_raw_len[packet_type];
             size_t data_fec_len = scf_packet_fec_len[packet_type];
-            void *data_rs_code = scf_packet_rs_code[packet_type];
 
             size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
 
@@ -309,7 +290,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 data_fec_buf[i] = byte_val;
             }
 
-            if (msg_decode(msg, data_fec_buf, data_rs_code, data_raw_len)) {
+            if (scf_packet_decode(msg, data_fec_buf, packet_type)) {
                 msg_len = data_raw_len;
                 symbol_skip = 5;
             }

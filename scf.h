@@ -18,7 +18,7 @@
 #define SCF_SYNC_LEN (5 * SCF_FEC_LEN)
 
 void scf_packet_init(uint64_t seed);
-size_t scf_encode_packet(uint32_t *packet, uint8_t *msg, size_t msg_len);
+size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len);
 void scf_tx_init(float freq);
 void scf_tx(float *passband, uint32_t symbol, float gain);
 void scf_rx_init(float freq);

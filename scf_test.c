@@ -111,7 +111,7 @@ bool run_test(void)
 
     scf_packet_init(gsl_rng_get(rng));
     generate_message(tx_message);
-    size_t pkt_len = scf_encode_packet(tx_packet, tx_message, MSG_RAW_LEN);
+    size_t pkt_len = scf_packet_encode(tx_packet, tx_message, MSG_RAW_LEN);
     assert(pkt_len == PKT_LEN);
 
     size_t tx_rand_delay = gsl_rng_uniform_int(rng, SCF_SYM_LEN) + START_OFFSET * SCF_SYM_LEN;
