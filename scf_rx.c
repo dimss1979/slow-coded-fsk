@@ -18,6 +18,7 @@
 #define TONE_SPAN 8
 #define WEIGHT_SCALE (255.0f)
 #define SYNC_RATIO (2.3f)
+#define MAX_CFO 200 /* Hz */
 
 #define FFT_LEN (SCF_BB_SYM_LEN * FFT_RATIO)
 #define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
@@ -39,6 +40,8 @@ static float fft_window[SCF_BB_SYM_LEN];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static unsigned int symbol_skip;
+static int cfo_bin_min;
+static int cfo_bin_max;
 
 static bool initialized;
 
@@ -103,7 +106,8 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
 
     size_t step = (SCF_FEC_LEN * packet_fec_len) / SCF_SYNC_LEN + 1;
 
-    for (int b = 0; b < FFT_LEN; b += FFT_RATIO) {
+    for (int search_bin = cfo_bin_min; search_bin <= cfo_bin_max; search_bin += FFT_RATIO) {
+        size_t b = (search_bin + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
             size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
@@ -117,9 +121,9 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
         }
     }
 
-    size_t b0 = max_bin - FFT_RATIO * 2;
-    size_t b1 = max_bin + FFT_RATIO * 2;
-    for (size_t b = b0; b < b1; b++) {
+    int b0 = max_bin - FFT_RATIO * 2;
+    int b1 = max_bin + FFT_RATIO * 2;
+    for (int b = b0; b < b1; b++) {
         size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
@@ -209,6 +213,20 @@ void scf_rx_init(float freq)
         fft_window_init();
 
         initialized = true;
+    }
+
+    {
+        float cfo_step = (float) SCF_BB_SRATE / (float) FFT_LEN;
+        float low_tone = -((float) SCF_BB_SRATE / (float) SCF_BB_SYM_LEN) * (float) SCF_TONES / 2.0f;
+
+        float freq_min = low_tone - MAX_CFO;
+        float freq_max = low_tone + MAX_CFO;
+
+        int bin_min = (int) (freq_min / cfo_step);
+        int bin_max = (int) (freq_max / cfo_step);
+
+        cfo_bin_min = bin_min;
+        cfo_bin_max = bin_max;
     }
 }
 
