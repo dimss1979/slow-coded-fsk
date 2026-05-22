@@ -93,6 +93,6 @@ void scf_tx(float *passband, uint32_t symbol, float gain)
         }
 
         complex float bb = baseband_filtered[i];
-        passband[i] = crealf(bb) * sinf(carrier_phase) - cimagf(bb) * cosf(carrier_phase);
+        passband[i] = crealf(bb) * sinf(carrier_phase) + cimagf(bb) * cosf(carrier_phase);
     }
 }

@@ -7,35 +7,34 @@
 #include <float.h>
 #include <stdbool.h>
 #include <fec.h>
+#include <stdio.h>
 
 #include "scf.h"
 #include "scf_filter.h"
 #include "scf_packet.h"
 #include "scf_rx.h"
 
-#define SYM_PHASES 4
+#define SYM_PHASES 8
 #define FFT_RATIO 4
-#define TONE_SPAN 8
-#define WEIGHT_SCALE (255.0f)
-#define SYNC_RATIO (2.3f)
 
 #define FFT_LEN (SCF_BB_SYM_LEN * FFT_RATIO)
-#define SYNC_THR (SYNC_RATIO * SCF_SYNC_LEN * WEIGHT_SCALE * (1.0f / (2.0f * TONE_SPAN)))
-#define SYNC_MAX (SCF_SYNC_LEN * WEIGHT_SCALE * 1.0f)
 
 struct sym_phase {
     complex float *source;
-    uint8_t demod_buf[FFT_LEN][SCF_PKT_MAX];
+    float prev_peak;
+    size_t prev_peak_idx;
+    float tone_buf[SCF_TONES][SCF_PKT_MAX];
 };
 
 static struct sym_phase sym_phase[SYM_PHASES];
-static fftwf_plan fft_plan;
+static fftwf_plan fft_plan, ifft_plan;
 static fftwf_complex *fft_buf;
 static complex float input_signal[SCF_BB_SYM_LEN * 2];
 static float carrier_freq;
 static float carrier_phase;
 static complex float fir_tail[SCF_FIR_LEN_RF];
 static float fft_window[SCF_BB_SYM_LEN];
+static float spectrum_sample[FFT_LEN];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
 static unsigned int symbol_skip;
@@ -64,91 +63,124 @@ static void downconvert(float *signal)
     }
 }
 
-static void demodulate(struct sym_phase *c)
+static void calculate_spectrum(float *spectrum, complex float *signal)
 {
     for (size_t i = 0; i < FFT_LEN; i++) {
         if (i < SCF_BB_SYM_LEN) {
-            fft_buf[i] = c->source[i];
+            fft_buf[i] = signal[i];
             fft_buf[i] *= fft_window[i];
         } else {
             fft_buf[i] = 0.0f;
         }
     }
 
-    fftwf_execute_dft(fft_plan, fft_buf, fft_buf);
+    fftwf_execute(fft_plan);
 
-    float power[FFT_LEN];
-
-    for (int i = 0; i < FFT_LEN; i++) {
-        complex float bin = fft_buf[i];
-        power[i] = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
+    float sum = 0.0f;
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        float magnitude = sqrtf(fft_buf[i] * conjf(fft_buf[i]));
+        sum += magnitude;
+        spectrum[i] = magnitude;
     }
 
-    for (int i = 0; i < FFT_LEN; i++) {
-        float power_sum = 0.0f;
+    float dc_offset = sum / FFT_LEN;
+    float energy = 1e-10f;
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        spectrum[i] -= dc_offset;
+        energy += spectrum[i] * spectrum[i];
+    }
 
-        for (int j = -TONE_SPAN; j < TONE_SPAN; j++) {
-            int n = (i + j * FFT_RATIO + FFT_LEN) % FFT_LEN;
-            power_sum += power[n];
-        }
-
-        c->demod_buf[i][demod_buf_idx] = WEIGHT_SCALE * power[i] / power_sum;
+    float scale = sqrtf(energy);
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        spectrum[i] /= scale;
     }
 }
 
-static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, float *sync_weight, size_t *sync_bin)
+static void calculate_correlation(
+    float *correlation, float *signal1, float *signal2
+)
 {
-    uint32_t max_weight = 0;
-    size_t max_bin = 0;
+    complex float spectrum1[FFT_LEN];
+    complex float spectrum2[FFT_LEN];
 
+    for (size_t i = 0; i < FFT_LEN; i++)
+        fft_buf[i] = signal1[i];
+
+    fftwf_execute(fft_plan);
+
+    for (size_t i = 0; i < FFT_LEN; i++)
+        spectrum1[i] = fft_buf[i];
+
+    for (size_t i = 0; i < FFT_LEN; i++)
+        fft_buf[i] = signal2[i];
+
+    fftwf_execute(fft_plan);
+
+    for (size_t i = 0; i < FFT_LEN; i++)
+        spectrum2[i] = fft_buf[i];
+
+    for (size_t i = 0; i < FFT_LEN; i++)
+        fft_buf[i] = spectrum1[i] * conjf(spectrum2[i]);
+
+    fftwf_execute(ifft_plan);
+
+    for (size_t i = 0; i < FFT_LEN; i++)
+        correlation[i] = crealf(fft_buf[i]) / FFT_LEN;
+}
+
+static void demodulate(struct sym_phase *c)
+{
+    float received_spectrum[FFT_LEN];
+    calculate_spectrum(received_spectrum, c->source);
+
+    float correlation[FFT_LEN];
+    calculate_correlation(correlation, spectrum_sample, received_spectrum);
+
+    for (size_t t = 0; t < SCF_TONES; t++) {
+        size_t tone_offset = (t + 1) * FFT_RATIO;
+        size_t new_peak_idx = (c->prev_peak_idx + tone_offset) % FFT_LEN;
+        float tone_weight = correlation[new_peak_idx] * c->prev_peak;
+        c->tone_buf[t][demod_buf_idx] = tone_weight;
+    }
+
+    float peak = 0.0f;
+    size_t peak_idx = 0;
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        if (correlation[i] > peak) {
+            peak = correlation[i];
+            peak_idx = i;
+        }
+    }
+
+    c->prev_peak = peak;
+    c->prev_peak_idx = peak_idx;
+}
+
+static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, float *sync_weight)
+{
     size_t step = (SCF_FEC_LEN * packet_fec_len) / SCF_SYNC_LEN + 1;
 
-    for (int b = 0; b < FFT_LEN; b += FFT_RATIO) {
-        uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
-            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
-            size_t pos = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
-            weight += p->demod_buf[t][pos];
-        }
-
-        if (weight > max_weight) {
-            max_weight = weight;
-            max_bin = b;
-        }
+    float weight = 0.0f;
+    for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
+        size_t t = sync_vector[i];
+        size_t pos = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
+        weight += p->tone_buf[t][pos];
     }
+    weight /= SCF_SYNC_LEN;
 
-    size_t b0 = max_bin - FFT_RATIO * 2;
-    size_t b1 = max_bin + FFT_RATIO * 2;
-    for (size_t b = b0; b < b1; b++) {
-        size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
-        uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
-            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
-            size_t pos = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
-            weight += p->demod_buf[t][pos];
-        }
-
-        if (weight > max_weight) {
-            max_weight = weight;
-            max_bin = b_wrapped;
-        }
-    }
-
-    if (max_weight > SYNC_THR) {
-        *sync_weight = (float) max_weight / SYNC_MAX;
-        *sync_bin = max_bin;
-    }
+    if (weight > 0.01f)
+        *sync_weight = weight;
 }
 
-static uint8_t ml_decode(size_t *positions, size_t phase, size_t bin, size_t codeword_size, uint32_t *code_table)
+static uint8_t ml_decode(size_t *positions, size_t phase, size_t codeword_size, uint32_t *code_table)
 {
-    uint32_t max_weight = 0;
+    float max_weight = 0.0f;
     uint8_t max_symbol = 0;
     for (size_t i = 0; i < 256; i++) {
-        uint32_t weight = 0;
+        float weight = 0.0f;
         for (size_t s = 0; s < codeword_size; s++) {
-            size_t b = (bin + FFT_RATIO * code_table[i * codeword_size + s]) % FFT_LEN;
-            weight += sym_phase[phase].demod_buf[b][positions[s]];
+            size_t tone_idx = code_table[i * codeword_size + s];
+            weight += sym_phase[phase].tone_buf[tone_idx][positions[s]];
         }
 
         if (weight > max_weight) {
@@ -206,10 +238,21 @@ void scf_rx_init(float freq)
         );
         assert(fft_plan);
 
+        ifft_plan = fftwf_plan_dft_1d(
+            FFT_LEN,
+            fft_buf,
+            fft_buf,
+            FFTW_BACKWARD,
+            FFTW_ESTIMATE
+        );
+        assert(ifft_plan);
+
         fft_window_init();
 
         initialized = true;
     }
+
+    calculate_spectrum(spectrum_sample, &scf_waveform[0][0]);
 }
 
 size_t scf_rx_symbol(uint8_t *msg, float *signal)
@@ -218,8 +261,7 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
 
     downconvert(signal);
 
-    float max_sync_weight = 0;
-    size_t max_sync_bin = 0;
+    float max_sync_weight = 0.0f;
     size_t max_sync_phase = 0;
     size_t packet_type = 0;
 
@@ -227,29 +269,26 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
         demodulate(&sym_phase[i]);
 
         for (size_t pt = 0; pt < SCF_PACKET_TYPES; pt++) {
-            float sync_weight = 0;
-            size_t sync_bin = 0;
+            float sync_weight = 0.0f;
             find_sync(
                 &sym_phase[i],
                 &scf_packet_sync_vector[pt][0],
                 scf_packet_fec_len[pt],
-                &sync_weight,
-                &sync_bin
+                &sync_weight
             );
 
             if (sync_weight > max_sync_weight) {
                 max_sync_weight = sync_weight;
-                max_sync_bin = sync_bin;
                 max_sync_phase = i;
                 packet_type = pt;
             }
         }
     }
 
-    if (max_sync_weight > 0) {
+    if (max_sync_weight > 0.0f) {
         printf(
-            " +++ sync at %i weight %f bin %li phase %li, packet of %li bytes\n",
-                symbol_counter, max_sync_weight, max_sync_bin, max_sync_phase,
+            " +++ sync at %i weight %f phase %li, packet of %li bytes\n",
+                symbol_counter, max_sync_weight, max_sync_phase,
                 scf_packet_raw_len[packet_type]
         );
 
@@ -287,7 +326,6 @@ size_t scf_rx_symbol(uint8_t *msg, float *signal)
                 uint8_t byte_val = ml_decode(
                     &positions[i][0],
                     max_sync_phase,
-                    max_sync_bin,
                     SCF_FEC_LEN,
                     &scf_data_code[0][0]
                 );

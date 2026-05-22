@@ -116,7 +116,6 @@ void scf_waveform_init(uint64_t seed)
         for (size_t s = 0; s < SCF_BB_SYM_LEN; s++) {
             fft_buf[s] = primary_spectrum[(s + w) % SCF_BB_SYM_LEN];
         }
-        fft_buf[0] = 0.0f;
 
         fftwf_execute(fft_plan);
 
