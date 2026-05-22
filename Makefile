@@ -1,21 +1,23 @@
 CC = gcc
-CFLAGS = -g -Wall -Werror -O3
-TARGETS = scf_test
+CFLAGS = -g -Wall -Werror -O3 -MMD -MP
+LDFLAGS =
+LDLIBS = -lfftw3f -lgsl -lm -lfec
 
-.PHONY: default all clean
+SCF_SRCS = scf_test.c scf_filter.c scf_tx.c scf_rx.c scf_packet.c
+SCF_OBJS = $(SCF_SRCS:.c=.o)
+SCF_DEPS = $(SCF_OBJS:.o=.d)
 
-default: all
+.PHONY: all clean
 
-all: $(TARGETS)
+all: scf_test
 
-OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
-HEADERS = $(wildcard *.h)
+scf_test: $(SCF_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ -c $<
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-scf_test: scf_test.o scf_filter.o scf_tx.o scf_rx.o scf_packet.o
-	$(CC) $(CFLAGS) -o $@ $? -lfftw3f -lgsl -lm -lfec
+-include $(SCF_DEPS)
 
 clean:
-	-rm -f *.o $(TARGETS)
+	rm -f scf_test $(SCF_OBJS) $(SCF_DEPS)
