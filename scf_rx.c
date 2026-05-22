@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <fec.h>
 
-#include "scf.h"
+#include "scf_private.h"
 
 #define SYM_PHASES 4
 #define FFT_RATIO 4

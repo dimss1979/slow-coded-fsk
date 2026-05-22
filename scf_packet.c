@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "scf.h"
+#include "scf_private.h"
 
 static bool rs_code_initialized = false;
 

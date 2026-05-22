@@ -5,7 +5,7 @@
 #include <string.h>
 #include <fec.h>
 
-#include "scf.h"
+#include "scf_private.h"
 
 #define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 20)
 #define FREQ_STEP ((float)SCF_BB_SRATE / SCF_BB_SYM_LEN)

@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include "scf.h"
+#include "scf_private.h"
 
 #define FIR_FFT_LEN 2048
 
