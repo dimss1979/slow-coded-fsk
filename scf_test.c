@@ -16,17 +16,17 @@
 
 #define MSG_RAW_LEN 107 /* bytes */
 #define MSG_FEC_LEN 129 /* bytes */
-#define START_OFFSET 20 /* symbols */
+#define START_OFFSET 2 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 
-#define PKT_LEN (SCF_SYNC_LEN + SCF_FEC_LEN * MSG_FEC_LEN) /* symbols */
+#define PKT_LEN (MSG_FEC_LEN) /* symbols */
 #define RX_SIGNAL_LEN ((START_OFFSET + PKT_LEN + START_OFFSET) * SCF_SYM_LEN) /* samples */
 #define TX_SIGNAL_LEN (PKT_LEN * SCF_SYM_LEN) /* samples */
 
 gsl_rng *rng;
 
 uint8_t tx_message[MSG_RAW_LEN];
-uint32_t tx_packet[SCF_PKT_MAX];
+uint32_t tx_packet[MSG_FEC_LEN];
 float *tx_signal;
 float *noise;
 float *rx_signal;
@@ -109,7 +109,7 @@ bool run_test(void)
 
     // TX
 
-    scf_packet_init(gsl_rng_get(rng));
+    scf_packet_init();
     generate_message(tx_message);
     size_t pkt_len = scf_packet_encode(tx_packet, tx_message, MSG_RAW_LEN);
     assert(pkt_len == PKT_LEN);
@@ -120,7 +120,7 @@ bool run_test(void)
     scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
     size_t signal_i = tx_rand_delay;
     for (size_t i = 0; i < PKT_LEN; i++) {
-        scf_tx(&tx_signal[signal_i], tx_packet[i], (float) SCF_DEC_RATIO);
+        scf_tx(&tx_signal[signal_i], tx_packet[i], 1.0f);
         signal_i += SCF_SYM_LEN;
     }
     //dump_signal("dump_tx_signal.raw", tx_signal, RX_SIGNAL_LEN);
@@ -130,7 +130,7 @@ bool run_test(void)
 
     // Channel
 
-    add_awgn(noise, RX_SIGNAL_LEN, 10.8f);
+    add_awgn(noise, RX_SIGNAL_LEN, 1.0f);
     add_cw_interferer(noise, RX_SIGNAL_LEN, CARRIER_FREQ, 0.0001f);
     float noise_power = measure_power(&noise[tx_rand_delay], TX_SIGNAL_LEN);
 
@@ -157,13 +157,6 @@ bool run_test(void)
     ) {
         scf_rx_result result;
         scf_rx(&result, &rx_signal[i]);
-
-        if (result.got_sync) {
-            printf(" +++ Sync at %li weight %f cfo %f phase %li, packet type %li\n",
-                result.symbol_counter, result.sync_weight, result.sync_cfo, result.sync_phase,
-                result.sync_packet_type
-            );
-        }
 
         if (result.got_msg) {
             if (result.msg_len != MSG_RAW_LEN) {
