@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <string.h>
 #include <sys/random.h>
+
 #include "scf.h"
 #include "scf_private.h"
 
@@ -56,8 +57,8 @@ void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain)
 
         complex float pilot_bb = pilot_baseband_filtered[i];
         complex float bearer_bb = bearer_baseband_filtered[i];
-        signal[i] = crealf(pilot_bb) * sinf(pilot_phase) - cimagf(pilot_bb) * cosf(pilot_phase) +
-                    crealf(bearer_bb) * sinf(bearer_phase) - cimagf(bearer_bb) * cosf(bearer_phase);
+        signal[i] = crealf(pilot_bb) * sinf(pilot_phase) + cimagf(pilot_bb) * cosf(pilot_phase) +
+                    crealf(bearer_bb) * sinf(bearer_phase) + cimagf(bearer_bb) * cosf(bearer_phase);
 
         signal[i] *= gain;
     }
