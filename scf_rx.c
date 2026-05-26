@@ -11,7 +11,7 @@
 #include "scf.h"
 #include "scf_private.h"
 
-#define SYM_PHASES 2
+#define SYM_PHASES 1
 
 struct sym_phase {
     complex float *pilot_source;
@@ -56,28 +56,52 @@ static void downconvert(struct signal_chain *chain, float *signal)
     scf_filter_rf(chain->baseband + SCF_SYM_LEN, baseband, chain->fir_tail);
 }
 
-static void correlate_against_template(complex float *out_fd, complex float *in_td, complex float *template_fd)
+static void correlate_against_template(complex float *out_td, complex float *in_td, complex float *template_fd)
 {
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
         fft_buf[i] = in_td[i];
     }
     fftwf_execute(fft_plan);
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        out_fd[i] = fft_buf[i] * template_fd[i];
+        fft_buf[i] = fft_buf[i] * template_fd[i];
+    }
+    fftwf_execute(ifft_plan);
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        out_td[i] = fft_buf[i] / (float) SCF_SYM_LEN;
     }
 }
 
 static void demodulate(struct sym_phase *c)
 {
+    complex float correlated_pilot_td[SCF_SYM_LEN] = {0};
+    complex float correlated_bearer_td[SCF_SYM_LEN] = {0};
+
+    correlate_against_template(correlated_pilot_td, c->pilot_source, zadoff_chu_template);
+    correlate_against_template(correlated_bearer_td, c->bearer_source, zadoff_chu_template);
+
     complex float correlated_pilot_fd[SCF_SYM_LEN] = {0};
     complex float correlated_bearer_fd[SCF_SYM_LEN] = {0};
-    complex float correlated_product_td[SCF_SYM_LEN] = {0};
-
-    correlate_against_template(correlated_pilot_fd, c->pilot_source, zadoff_chu_template);
-    correlate_against_template(correlated_bearer_fd, c->bearer_source, zadoff_chu_template);
 
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        fft_buf[i] = correlated_pilot_fd[i] * conjf(correlated_bearer_fd[i]);
+        fft_buf[i] = correlated_pilot_td[i] * conjf(correlated_pilot_td[i]);
+    }
+    fftwf_execute(fft_plan);
+    for (size_t i = 1; i < SCF_SYM_LEN; i++) {
+        correlated_pilot_fd[i] = fft_buf[i];
+    }
+
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        fft_buf[i] = correlated_bearer_td[i] * conjf(correlated_bearer_td[i]);
+    }
+    fftwf_execute(fft_plan);
+    for (size_t i = 1; i < SCF_SYM_LEN; i++) {
+        correlated_bearer_fd[i] = fft_buf[i];
+    }
+
+    complex float correlated_product_td[SCF_SYM_LEN] = {0};
+
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        fft_buf[i] = conjf(correlated_bearer_fd[i]) * correlated_pilot_fd[i];
     }
     fftwf_execute(ifft_plan);
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
