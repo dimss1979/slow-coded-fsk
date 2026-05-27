@@ -15,6 +15,9 @@
 #define SYM_PHASES 8
 #define CFO_STEPS  4
 
+// min (257+256)*8 = 4104
+#define FFT_LEN    4320
+
 #define RX_CHAINS (SYM_PHASES * CFO_STEPS)
 
 struct rx_chain {
@@ -29,7 +32,7 @@ float phase;
 complex float baseband[SCF_SYM_LEN * 2];
 complex float fir_tail[SCF_FIR_LEN_RF];
 
-static complex float zadoff_chu_template[SCF_SYM_LEN];
+static complex float zadoff_chu_template[FFT_LEN];
 static complex float cfo_vector[CFO_STEPS][SCF_SYM_LEN];
 static struct rx_chain rx_chain[RX_CHAINS];
 static fftwf_plan fft_plan, ifft_plan;
@@ -63,23 +66,27 @@ static void downconvert(float *signal)
 
 static void correlate_against_template(complex float *out_td, complex float *in_td, complex float *template_fd)
 {
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        fft_buf[i] = in_td[i];
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        if (i < SCF_SYM_LEN) {
+            fft_buf[i] = in_td[i];
+        } else {
+            fft_buf[i] = 0.0f;
+        }
     }
     fftwf_execute(fft_plan);
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+    for (size_t i = 0; i < FFT_LEN; i++) {
         fft_buf[i] = fft_buf[i] * template_fd[i];
     }
     fftwf_execute(ifft_plan);
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        out_td[i] = fft_buf[i] / (float) SCF_SYM_LEN;
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        out_td[i] = fft_buf[i] / (float) FFT_LEN;
     }
 }
 
 static void demodulate(struct rx_chain *c)
 {
     complex float source_cfo[SCF_SYM_LEN] = {0};
-    complex float correlated_td[SCF_SYM_LEN] = {0};
+    complex float correlated_td[FFT_LEN] = {0};
 
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
         source_cfo[i] = c->source[i] * cfo_vector[c->cfo_index][i];
@@ -89,12 +96,15 @@ static void demodulate(struct rx_chain *c)
 
     float max_peak_value = 0.0f;
     size_t max_peak_index = 0;
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        complex float peak = correlated_td[i];
-        float peak_value = peak * conjf(peak);
+    for (size_t l = 0; l < SCF_SYM_LEN; l++) {
+        int peak1_idx = l;
+        int peak2_idx = l - SCF_SYM_LEN + FFT_LEN;
+        complex float peak_value_complex = correlated_td[peak1_idx] + correlated_td[peak2_idx];
+        float peak_value = peak_value_complex * conjf(peak_value_complex);
+
         if (peak_value > max_peak_value) {
             max_peak_value = peak_value;
-            max_peak_index = i;
+            max_peak_index = l;
         }
     }
 
@@ -102,9 +112,14 @@ static void demodulate(struct rx_chain *c)
     size_t max_symbol_index = 0;
     for (uint32_t symbol = 0; symbol < 256; symbol++) {
         size_t symbol_offset = symbol * SCF_DEC_RATIO;
-        size_t peak_index = (c->prev_corr_peak_index - symbol_offset + SCF_SYM_LEN) % SCF_SYM_LEN;
-        complex float peak = correlated_td[peak_index];
-        float peak_value = peak * conjf(peak);
+        size_t new_lag = (c->prev_corr_peak_index - symbol_offset + SCF_SYM_LEN) % SCF_SYM_LEN;
+
+        int peak1_idx = new_lag;
+        int peak2_idx = new_lag - SCF_SYM_LEN + FFT_LEN;
+
+        complex float peak_value_complex = correlated_td[peak1_idx] + correlated_td[peak2_idx];
+        float peak_value = conjf(peak_value_complex) * peak_value_complex;
+
         if (peak_value > max_symbol_peak_value) {
             max_symbol_peak_value = peak_value;
             max_symbol_index = symbol;
@@ -119,18 +134,25 @@ static void generate_zadoff_chu_template(void)
 {
     complex float fir_tail[SCF_FIR_LEN_RF] = {0};
     complex float upconverted[SCF_SYM_LEN] = {0};
+    complex float filtered[SCF_SYM_LEN] = {0};
 
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
         upconverted[i * SCF_DEC_RATIO] = scf_packet_zadoff_chu_sequence[i];
     }
 
-    scf_filter_rf(fft_buf, upconverted, fir_tail);
+    scf_filter_rf(filtered, upconverted, fir_tail);
     for (size_t i = 0; i < SCF_FIR_LEN_RF; i++) {
-        fft_buf[i] += fir_tail[i];
+        filtered[i] += fir_tail[i];
     }
-
+    for (size_t i = 0; i < FFT_LEN; i++) {
+        if (i < SCF_SYM_LEN) {
+            fft_buf[i] = filtered[i];
+        } else {
+            fft_buf[i] = 0.0f;
+        }
+    }
     fftwf_execute(fft_plan);
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+    for (size_t i = 0; i < FFT_LEN; i++) {
         zadoff_chu_template[i] = conjf(fft_buf[i]);
     }
 }
@@ -171,18 +193,18 @@ void scf_rx_init(float freq)
     phase = 0.0f;
 
     if (!initialized) {
-        fft_buf = fftwf_alloc_complex(SCF_SYM_LEN);
+        fft_buf = fftwf_alloc_complex(FFT_LEN);
         assert(fft_buf);
 
         fft_plan = fftwf_plan_dft_1d(
-            SCF_SYM_LEN,
+            FFT_LEN,
             fft_buf,
             fft_buf,
             FFTW_FORWARD,
             FFTW_ESTIMATE
         );
         ifft_plan = fftwf_plan_dft_1d(
-            SCF_SYM_LEN,
+            FFT_LEN,
             fft_buf,
             fft_buf,
             FFTW_BACKWARD,
