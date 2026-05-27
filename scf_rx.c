@@ -1,6 +1,7 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -79,47 +80,32 @@ static void demodulate(struct sym_phase *c)
     correlate_against_template(correlated_pilot_td, c->pilot_source, zadoff_chu_template);
     correlate_against_template(correlated_bearer_td, c->bearer_source, zadoff_chu_template);
 
-    complex float correlated_pilot_fd[SCF_SYM_LEN] = {0};
-    complex float correlated_bearer_fd[SCF_SYM_LEN] = {0};
-
+    float max_pilot_peak_value = 0.0f;
+    size_t max_pilot_peak_index = 0;
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        fft_buf[i] = correlated_pilot_td[i] * conjf(correlated_pilot_td[i]);
-    }
-    fftwf_execute(fft_plan);
-    for (size_t i = 1; i < SCF_SYM_LEN; i++) {
-        correlated_pilot_fd[i] = fft_buf[i];
-    }
-
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        fft_buf[i] = correlated_bearer_td[i] * conjf(correlated_bearer_td[i]);
-    }
-    fftwf_execute(fft_plan);
-    for (size_t i = 1; i < SCF_SYM_LEN; i++) {
-        correlated_bearer_fd[i] = fft_buf[i];
-    }
-
-    complex float correlated_product_td[SCF_SYM_LEN] = {0};
-
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        fft_buf[i] = conjf(correlated_bearer_fd[i]) * correlated_pilot_fd[i];
-    }
-    fftwf_execute(ifft_plan);
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        correlated_product_td[i] = fft_buf[i] / (float) SCF_SYM_LEN;
-    }
-
-    float max_peak_value = 0.0f;
-    size_t max_peak_symbol_index = 0;
-    for (size_t i = 0; i < 256; i++) {
-        size_t peak_index = (i + 1) * SCF_DEC_RATIO;
-        complex float peak = correlated_product_td[peak_index];
-        float peak_value = crealf(peak) * crealf(peak) + cimagf(peak) * cimagf(peak);
-        if (peak_value > max_peak_value) {
-            max_peak_value = peak_value;
-            max_peak_symbol_index = i;
+        complex float peak = correlated_pilot_td[i];
+        float peak_value = peak * conjf(peak);
+        if (peak_value > max_pilot_peak_value) {
+            max_pilot_peak_value = peak_value;
+            max_pilot_peak_index = i;
         }
     }
-    c->decoded_symbol[decoded_symbol_index] = max_peak_symbol_index;
+
+
+    float max_bearer_peak_value = 0.0f;
+    size_t max_bearer_peak_symbol_index = 0;
+    for (uint32_t symbol = 0; symbol < 256; symbol++) {
+        size_t bearer_offset = (symbol + 1) * SCF_DEC_RATIO;
+        size_t bearer_index = (max_pilot_peak_index - bearer_offset+ SCF_SYM_LEN) % SCF_SYM_LEN;
+        complex float bearer_peak = correlated_bearer_td[bearer_index];
+        float bearer_peak_value = bearer_peak * conjf(bearer_peak);
+        if (bearer_peak_value > max_bearer_peak_value) {
+            max_bearer_peak_value = bearer_peak_value;
+            max_bearer_peak_symbol_index = symbol;
+        }
+    }
+
+    c->decoded_symbol[decoded_symbol_index] = max_bearer_peak_symbol_index;
 }
 
 static void generate_zadoff_chu_template(void)

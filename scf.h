@@ -10,7 +10,7 @@
  */
 
 #define SCF_BB_SRATE 1000 /* Baseband sample rate in samples per second */
-#define SCF_BB_SYM_LEN 997 /* Baseband symbol length in samples */
+#define SCF_BB_SYM_LEN 257 /* Baseband symbol length in samples */
 #define SCF_DEC_RATIO 8 /* Decimation or upsampling ratio */
 #define SCF_PACKET_TYPES 2 /* How many different packet lengths */
 #define SCF_MAX_FEC_LEN 255 /* Maximum Reed-Solomon outer codeword length */
