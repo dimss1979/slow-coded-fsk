@@ -182,7 +182,7 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
         }
 
         for (size_t pt = 0; pt < SCF_PACKET_TYPES; pt++) {
-            size_t packet_len = scf_packet_fec_len[pt];
+            size_t packet_len = scf_packet_fec_len[pt] + 1;
             uint8_t packet[packet_len];
             for (size_t i = 0; i < packet_len; i++) {
                 size_t pos = (i + decoded_symbol_index - packet_len + 1 + SCF_MAX_FEC_LEN) % SCF_MAX_FEC_LEN;
