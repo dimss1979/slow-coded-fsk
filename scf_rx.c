@@ -12,7 +12,7 @@
 #include "scf.h"
 #include "scf_private.h"
 
-#define SYM_PHASES 1
+#define SYM_PHASES 8
 
 struct sym_phase {
     complex float *source;
