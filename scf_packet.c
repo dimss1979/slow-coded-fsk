@@ -71,10 +71,11 @@ size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len)
     }
     encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
     for (size_t i = 0; i < msg_fec_len; i++) {
-        packet[i] = msg_fec[i];
+        packet[i + 1] = msg_fec[i];
     }
+    packet[0] = 0;
 
-    return msg_fec_len;
+    return msg_fec_len + 1;
 }
 
 bool scf_packet_decode(scf_rx_result *result, uint8_t *outer_codeword, size_t packet_type)

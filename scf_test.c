@@ -15,18 +15,17 @@
 #include "scf.h"
 
 #define MSG_RAW_LEN 107 /* bytes */
-#define MSG_FEC_LEN 129 /* bytes */
+#define PKT_LEN 130 /* bytes */
 #define START_OFFSET 2 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 
-#define PKT_LEN (MSG_FEC_LEN) /* symbols */
 #define RX_SIGNAL_LEN ((START_OFFSET + PKT_LEN + START_OFFSET) * SCF_SYM_LEN) /* samples */
 #define TX_SIGNAL_LEN (PKT_LEN * SCF_SYM_LEN) /* samples */
 
 gsl_rng *rng;
 
 uint8_t tx_message[MSG_RAW_LEN];
-uint32_t tx_packet[MSG_FEC_LEN];
+uint32_t tx_packet[PKT_LEN];
 float *tx_signal;
 float *noise;
 float *rx_signal;

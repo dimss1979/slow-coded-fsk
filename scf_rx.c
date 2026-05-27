@@ -15,17 +15,15 @@
 #define SYM_PHASES 1
 
 struct sym_phase {
-    complex float *pilot_source;
-    complex float *bearer_source;
+    complex float *source;
     uint32_t decoded_symbol[SCF_MAX_FEC_LEN];
+    size_t prev_corr_peak_index;
 };
 
-struct signal_chain {
-    float freq;
-    float phase;
-    complex float baseband[SCF_SYM_LEN * 2];
-    complex float fir_tail[SCF_FIR_LEN_RF];
-} pilot_chain, bearer_chain;
+float center_freq;
+float phase;
+complex float baseband[SCF_SYM_LEN * 2];
+complex float fir_tail[SCF_FIR_LEN_RF];
 
 static complex float zadoff_chu_template[SCF_SYM_LEN];
 static struct sym_phase sym_phase[SYM_PHASES];
@@ -37,24 +35,25 @@ static size_t decoded_symbol_index;
 
 static bool initialized;
 
-static void downconvert(struct signal_chain *chain, float *signal)
+static void downconvert(float *signal)
 {
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        chain->baseband[i] = chain->baseband[i + SCF_SYM_LEN];
+        baseband[i] = baseband[i + SCF_SYM_LEN];
     }
 
-    complex float baseband[SCF_SYM_LEN];
-    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        float carrier_i = sinf(chain->phase);
-        float carrier_q = cosf(chain->phase);
-        baseband[i] = signal[i] * carrier_i + signal[i] * I * carrier_q;
+    complex float baseband_mixed[SCF_SYM_LEN] = {0};
 
-        chain->phase += 2.0f * M_PI * chain->freq * (1.0f / (float) SCF_SRATE);
-        while (chain->phase > 2.0f * M_PI) {
-            chain->phase -= 2.0f * M_PI;
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        float carrier_i = sinf(phase);
+        float carrier_q = cosf(phase);
+        baseband_mixed[i] = signal[i] * carrier_i + signal[i] * I * carrier_q;
+
+        phase += 2.0f * M_PI * center_freq * (1.0f / (float) SCF_SRATE);
+        while (phase > 2.0f * M_PI) {
+            phase -= 2.0f * M_PI;
         }
     }
-    scf_filter_rf(chain->baseband + SCF_SYM_LEN, baseband, chain->fir_tail);
+    scf_filter_rf(baseband + SCF_SYM_LEN, baseband_mixed, fir_tail);
 }
 
 static void correlate_against_template(complex float *out_td, complex float *in_td, complex float *template_fd)
@@ -74,38 +73,36 @@ static void correlate_against_template(complex float *out_td, complex float *in_
 
 static void demodulate(struct sym_phase *c)
 {
-    complex float correlated_pilot_td[SCF_SYM_LEN] = {0};
-    complex float correlated_bearer_td[SCF_SYM_LEN] = {0};
+    complex float correlated_td[SCF_SYM_LEN] = {0};
 
-    correlate_against_template(correlated_pilot_td, c->pilot_source, zadoff_chu_template);
-    correlate_against_template(correlated_bearer_td, c->bearer_source, zadoff_chu_template);
+    correlate_against_template(correlated_td, c->source, zadoff_chu_template);
 
-    float max_pilot_peak_value = 0.0f;
-    size_t max_pilot_peak_index = 0;
+    float max_peak_value = 0.0f;
+    size_t max_peak_index = 0;
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
-        complex float peak = correlated_pilot_td[i];
+        complex float peak = correlated_td[i];
         float peak_value = peak * conjf(peak);
-        if (peak_value > max_pilot_peak_value) {
-            max_pilot_peak_value = peak_value;
-            max_pilot_peak_index = i;
+        if (peak_value > max_peak_value) {
+            max_peak_value = peak_value;
+            max_peak_index = i;
         }
     }
 
-
-    float max_bearer_peak_value = 0.0f;
-    size_t max_bearer_peak_symbol_index = 0;
+    float max_symbol_peak_value = 0.0f;
+    size_t max_symbol_index = 0;
     for (uint32_t symbol = 0; symbol < 256; symbol++) {
-        size_t bearer_offset = (symbol + 1) * SCF_DEC_RATIO;
-        size_t bearer_index = (max_pilot_peak_index - bearer_offset+ SCF_SYM_LEN) % SCF_SYM_LEN;
-        complex float bearer_peak = correlated_bearer_td[bearer_index];
-        float bearer_peak_value = bearer_peak * conjf(bearer_peak);
-        if (bearer_peak_value > max_bearer_peak_value) {
-            max_bearer_peak_value = bearer_peak_value;
-            max_bearer_peak_symbol_index = symbol;
+        size_t symbol_offset = symbol * SCF_DEC_RATIO;
+        size_t peak_index = (c->prev_corr_peak_index - symbol_offset + SCF_SYM_LEN) % SCF_SYM_LEN;
+        complex float peak = correlated_td[peak_index];
+        float peak_value = peak * conjf(peak);
+        if (peak_value > max_symbol_peak_value) {
+            max_symbol_peak_value = peak_value;
+            max_symbol_index = symbol;
         }
     }
 
-    c->decoded_symbol[decoded_symbol_index] = max_bearer_peak_symbol_index;
+    c->decoded_symbol[decoded_symbol_index] = max_symbol_index;
+    c->prev_corr_peak_index = max_peak_index;
 }
 
 static void generate_zadoff_chu_template(void)
@@ -134,16 +131,13 @@ void scf_rx_init(float freq)
     symbol_skip = 0;
 
     for (size_t i = 0; i < SYM_PHASES; i++) {
-        sym_phase[i].pilot_source = &pilot_chain.baseband[i * SCF_SYM_LEN / SYM_PHASES];
-        sym_phase[i].bearer_source = &bearer_chain.baseband[i * SCF_SYM_LEN / SYM_PHASES];
+        sym_phase[i].source = &baseband[i * SCF_SYM_LEN / SYM_PHASES];
         // To prevent Reed Solomon decoder from decoding the symbol prematurely
         getrandom(sym_phase[i].decoded_symbol, sizeof(sym_phase[i].decoded_symbol), 0);
     }
 
-    memset(&pilot_chain, 0, sizeof(pilot_chain));
-    memset(&bearer_chain, 0, sizeof(bearer_chain));
-    pilot_chain.freq = freq - SCF_GUARD_BAND / 2 - SCF_BB_SRATE / 2;
-    bearer_chain.freq = freq + SCF_GUARD_BAND / 2 + SCF_BB_SRATE / 2;
+    center_freq = freq;
+    phase = 0.0f;
 
     if (!initialized) {
         fft_buf = fftwf_alloc_complex(SCF_SYM_LEN);
@@ -177,8 +171,7 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
     memset(result, 0, sizeof(scf_rx_result));
     result->symbol_counter = symbol_counter;
 
-    downconvert(&pilot_chain, signal);
-    downconvert(&bearer_chain, signal);
+    downconvert(signal);
 
     for (size_t phase_index = 0; phase_index < SYM_PHASES; phase_index++) {
         struct sym_phase *c = &sym_phase[phase_index];
