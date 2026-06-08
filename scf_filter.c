@@ -6,45 +6,37 @@
 #include "scf_private.h"
 
 #define FIR_FFT_LEN 2048
+_Static_assert(SCF_SYM_LEN + SCF_FIR_LEN_RF - 1 <= FIR_FFT_LEN);
 
 static const complex float bb_fir_rf_td[];
-static complex float bb_fir_rf_fd[FIR_FFT_LEN];
 
-static fftwf_complex *fft_in;
-static fftwf_complex *fft_out;
-static fftwf_plan fft;
-
-static fftwf_complex *ifft_in;
-static fftwf_complex *ifft_out;
-static fftwf_plan ifft;
+static fftwf_complex *fft_in_rx, *fft_in_tx, *fft_kernel_fd, *fft_fd, *fft_out;
+static fftwf_plan fft, ifft;
 
 static unsigned int initialized;
 
-static void scf_filter_internal(complex float *out, complex float *in, complex float *tail, size_t tail_len, complex float *fir_fd)
+static void scf_filter_internal(complex float *out, complex float *in, fftwf_complex *fft_in)
 {
     assert(initialized);
-    assert(SCF_SYM_LEN + tail_len <= FIR_FFT_LEN);
 
-    memset(fft_in, 0, FIR_FFT_LEN * sizeof(fft_in[0]));
-    memcpy(fft_in, in, SCF_SYM_LEN * sizeof(fft_in[0]));
+    for (size_t i = 0; i < FIR_FFT_LEN - SCF_SYM_LEN; i++) {
+        fft_in[i] = fft_in[i + SCF_SYM_LEN];
+    }
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        fft_in[FIR_FFT_LEN - SCF_SYM_LEN + i] = in[i];
+    }
 
-    fftwf_execute(fft);
+    fftwf_execute_dft(fft, fft_in, fft_fd);
 
-    memcpy(ifft_in, fft_out, FIR_FFT_LEN * sizeof(ifft_in[0]));
     for (size_t i = 0; i < FIR_FFT_LEN; i++) {
-        ifft_in[i] *= fir_fd[i];
+        fft_fd[i] *= fft_kernel_fd[i];
     }
 
     fftwf_execute(ifft);
 
-    for (size_t i = 0; i < FIR_FFT_LEN; i++) {
-        ifft_out[i] /= (float) FIR_FFT_LEN;
+    for (size_t i = 0; i < SCF_SYM_LEN; i++) {
+        out[i] = fft_out[FIR_FFT_LEN - SCF_SYM_LEN + i] / (float) FIR_FFT_LEN;
     }
-    for (size_t i = 0; i < tail_len; i++) {
-        ifft_out[i] += tail[i];
-    }
-    memcpy(out, ifft_out, SCF_SYM_LEN * sizeof(out[0]));
-    memcpy(tail, &ifft_out[SCF_SYM_LEN], tail_len * sizeof(tail[0]));
 }
 
 void scf_filter_init(void)
@@ -52,31 +44,42 @@ void scf_filter_init(void)
     if (initialized)
         return;
 
-    fft_in = fftwf_alloc_complex(FIR_FFT_LEN);
+    fft_in_rx = fftwf_alloc_complex(FIR_FFT_LEN);
+    fft_in_tx = fftwf_alloc_complex(FIR_FFT_LEN);
+    fft_kernel_fd = fftwf_alloc_complex(FIR_FFT_LEN);
+    fft_fd = fftwf_alloc_complex(FIR_FFT_LEN);
     fft_out = fftwf_alloc_complex(FIR_FFT_LEN);
-    assert(fft_in);
-    assert(fft_out);
-    fft = fftwf_plan_dft_1d(FIR_FFT_LEN, fft_in, fft_out, FFTW_FORWARD, FFTW_ESTIMATE);
-    assert(fft);
+    assert(fft_in_rx && fft_in_tx && fft_out && fft_kernel_fd && fft_fd && fft_out);
 
-    ifft_in = fftwf_alloc_complex(FIR_FFT_LEN);
-    ifft_out = fftwf_alloc_complex(FIR_FFT_LEN);
-    assert(ifft_in);
-    assert(ifft_out);
-    ifft = fftwf_plan_dft_1d(FIR_FFT_LEN, ifft_in, ifft_out, FFTW_BACKWARD, FFTW_ESTIMATE);
-    assert(ifft);
+    fft = fftwf_plan_dft_1d(FIR_FFT_LEN, fft_in_rx, fft_fd, FFTW_FORWARD, FFTW_ESTIMATE);
+    ifft = fftwf_plan_dft_1d(FIR_FFT_LEN, fft_fd, fft_out, FFTW_BACKWARD, FFTW_ESTIMATE);
+    assert(fft && ifft);
 
-    memset(fft_in, 0, sizeof(fft_in[0]) * FIR_FFT_LEN);
-    memcpy(fft_in, bb_fir_rf_td, SCF_FIR_LEN_RF * sizeof(fft_in[0]));
-    fftwf_execute(fft);
-    memcpy(bb_fir_rf_fd, fft_out, sizeof(bb_fir_rf_fd));
+    for (size_t i = 0; i < FIR_FFT_LEN; i++) {
+        if (i < SCF_FIR_LEN_RF) {
+            fft_in_rx[i] = bb_fir_rf_td[i];
+        } else {
+            fft_in_rx[i] = 0.0f;
+        }
+    }
+    fftwf_execute_dft(fft, fft_in_rx, fft_kernel_fd);
+
+    for (size_t i = 0; i < FIR_FFT_LEN; i++) {
+        fft_in_rx[i] = 0.0f;
+        fft_in_tx[i] = 0.0f;
+    }
 
     initialized = 1;
 }
 
-void scf_filter_rf(complex float *out, complex float *in, complex float *tail)
+void scf_filter_rx(complex float *out, complex float *in)
 {
-    scf_filter_internal(out, in, tail, SCF_FIR_LEN_RF, bb_fir_rf_fd);
+    scf_filter_internal(out, in, fft_in_rx);
+}
+
+void scf_filter_tx(complex float *out, complex float *in)
+{
+    scf_filter_internal(out, in, fft_in_tx);
 }
 
 // https://fiiir.com/

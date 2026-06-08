@@ -15,7 +15,8 @@ extern uint32_t scf_inner_code[256][SCF_FEC_LEN];
 extern uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
 
 void scf_filter_init(void);
-void scf_filter_rf(float _Complex *out, float _Complex *in, float _Complex *tail);
+void scf_filter_rx(float _Complex *out, float _Complex *in);
+void scf_filter_tx(float _Complex *out, float _Complex *in);
 
 bool scf_packet_decode(scf_rx_result *result, uint8_t *outer_codeword);
 

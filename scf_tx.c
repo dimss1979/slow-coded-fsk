@@ -12,7 +12,6 @@ static float carrier_freq;
 static float carrier_phase;
 static float baseband_phase;
 
-static complex float fir_tail[SCF_FIR_LEN_RF];
 static float mod_filter_buf[MOD_FILTER_LEN];
 static float mod_filter_kernel[MOD_FILTER_LEN];
 static size_t mod_filter_idx;
@@ -73,7 +72,7 @@ void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain)
         }
     }
 
-    scf_filter_rf(baseband_filtered, baseband, fir_tail);
+    scf_filter_tx(baseband_filtered, baseband);
 
     for (size_t i = 0; i < SCF_SYM_LEN; i++) {
         carrier_phase += 2.0f * M_PI * carrier_freq * (1.0f / SCF_SRATE);

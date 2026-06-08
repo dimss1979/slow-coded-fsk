@@ -30,7 +30,6 @@ static fftwf_complex *fft_buf;
 static complex float input_signal[SCF_BB_SYM_LEN * 2];
 static float carrier_freq;
 static float carrier_phase;
-static complex float fir_tail[SCF_FIR_LEN_RF];
 static float fft_window[SCF_BB_SYM_LEN];
 static size_t demod_buf_idx;
 static unsigned int symbol_counter;
@@ -62,7 +61,7 @@ static void downconvert(float *signal)
         carrier_phase -= 2.0f * M_PI;
     }
 
-    scf_filter_rf(baseband_filtered, baseband, fir_tail);
+    scf_filter_rx(baseband_filtered, baseband);
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
         input_signal[SCF_BB_SYM_LEN + i] = baseband_filtered[i * SCF_DEC_RATIO];
     }
