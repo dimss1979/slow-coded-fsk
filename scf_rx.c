@@ -102,40 +102,41 @@ static void demodulate(struct sym_phase *c)
 
 static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_fec_len, float *sync_weight, size_t *sync_bin)
 {
-    uint32_t max_weight = 0;
-    size_t max_bin = 0;
-
     size_t step = (SCF_FEC_LEN * packet_fec_len) / SCF_SYNC_LEN + 1;
-
     size_t pos[SCF_SYNC_LEN];
     for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
         pos[i] = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
     }
 
-    for (int b = cfo_bin_min; b <= cfo_bin_max; b += FFT_RATIO) {
-        uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
+    uint32_t max_weight = 0;
+    size_t max_bin = 0;
+    uint32_t weight_per_bin[FFT_LEN] = {0};
+    for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
+        for (int b = cfo_bin_min; b <= cfo_bin_max; b += FFT_RATIO) {
             size_t t = b + sync_vector[i] * FFT_RATIO;
-            weight += p->demod_buf[pos[i]][t];
+            weight_per_bin[b] += p->demod_buf[pos[i]][t];
         }
-
-        if (weight > max_weight) {
-            max_weight = weight;
+    }
+    for (int b = cfo_bin_min; b <= cfo_bin_max; b += FFT_RATIO) {
+        if (weight_per_bin[b] > max_weight) {
+            max_weight = weight_per_bin[b];
             max_bin = b;
         }
     }
 
+    max_weight = 0;
+    memset(weight_per_bin, 0, sizeof(weight_per_bin));
     int b0 = max_bin - FFT_RATIO * 2;
     int b1 = max_bin + FFT_RATIO * 2;
-    for (int b = b0; b < b1; b++) {
-        uint32_t weight = 0;
-        for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
+    for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
+        for (int b = b0; b <= b1; b++) {
             size_t t = b + sync_vector[i] * FFT_RATIO;
-            weight += p->demod_buf[pos[i]][t];
+            weight_per_bin[b] += p->demod_buf[pos[i]][t];
         }
-
-        if (weight > max_weight) {
-            max_weight = weight;
+    }
+    for (int b = b0; b <= b1; b++) {
+        if (weight_per_bin[b] > max_weight) {
+            max_weight = weight_per_bin[b];
             max_bin = b;
         }
     }
