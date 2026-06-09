@@ -39,8 +39,8 @@ static const float cfo_step = (float) SCF_BB_SRATE / (float) FFT_LEN;
 static const float cfo_low_tone = -((float) SCF_BB_SRATE / (float) SCF_BB_SYM_LEN) * ((float) (SCF_TONES - 1) / 2.0f);
 static const float cfo_freq_min = cfo_low_tone - MAX_CFO;
 static const float cfo_freq_max = cfo_low_tone + MAX_CFO;
-static const int cfo_bin_min = (int) (cfo_freq_min / cfo_step);
-static const int cfo_bin_max = (int) (cfo_freq_max / cfo_step);
+static const int cfo_bin_min = (int) (cfo_freq_min / cfo_step) + FFT_LEN / 2;
+static const int cfo_bin_max = (int) (cfo_freq_max / cfo_step) + FFT_LEN / 2;
 
 static bool initialized;
 
@@ -84,14 +84,15 @@ static void demodulate(struct sym_phase *c)
 
     for (int i = 0; i < FFT_LEN; i++) {
         complex float bin = fft_buf[i];
-        power[i] = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
+        size_t shifted_idx = (i + FFT_LEN / 2) % FFT_LEN;
+        power[shifted_idx] = crealf(bin) * crealf(bin) + cimagf(bin) * cimagf(bin);
     }
 
-    for (int i = 0; i < FFT_LEN; i++) {
+    for (int i = TONE_SPAN * FFT_RATIO; i < FFT_LEN - (TONE_SPAN * FFT_RATIO); i++) {
         float power_sum = 0.0f;
 
         for (int j = -TONE_SPAN; j < TONE_SPAN; j++) {
-            int n = (i + j * FFT_RATIO + FFT_LEN) % FFT_LEN;
+            int n = i + j * FFT_RATIO;
             power_sum += power[n];
         }
 
@@ -111,11 +112,10 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
         pos[i] = (demod_buf_idx + (i - SCF_SYNC_LEN + 1) * step + SCF_PKT_MAX) % SCF_PKT_MAX;
     }
 
-    for (int search_bin = cfo_bin_min; search_bin <= cfo_bin_max; search_bin += FFT_RATIO) {
-        size_t b = (search_bin + FFT_LEN) % FFT_LEN;
+    for (int b = cfo_bin_min; b <= cfo_bin_max; b += FFT_RATIO) {
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
-            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
+            size_t t = b + sync_vector[i] * FFT_RATIO;
             weight += p->demod_buf[pos[i]][t];
         }
 
@@ -128,16 +128,15 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
     int b0 = max_bin - FFT_RATIO * 2;
     int b1 = max_bin + FFT_RATIO * 2;
     for (int b = b0; b < b1; b++) {
-        size_t b_wrapped = (b + FFT_LEN) % FFT_LEN;
         uint32_t weight = 0;
         for (size_t i = 0; i < SCF_SYNC_LEN; i++) {
-            size_t t = (b + sync_vector[i] * FFT_RATIO) % FFT_LEN;
+            size_t t = b + sync_vector[i] * FFT_RATIO;
             weight += p->demod_buf[pos[i]][t];
         }
 
         if (weight > max_weight) {
             max_weight = weight;
-            max_bin = b_wrapped;
+            max_bin = b;
         }
     }
 
@@ -154,7 +153,7 @@ static uint8_t ml_decode(size_t *positions, size_t phase, size_t bin, size_t cod
     for (size_t i = 0; i < 256; i++) {
         uint32_t weight = 0;
         for (size_t s = 0; s < codeword_size; s++) {
-            size_t b = (bin + FFT_RATIO * code_table[i * codeword_size + s]) % FFT_LEN;
+            size_t b = bin + FFT_RATIO * code_table[i * codeword_size + s];
             weight += sym_phase[phase].demod_buf[positions[s]][b];
         }
 
@@ -240,7 +239,7 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
 
     if (max_sync_weight > 0) {
 
-        int sync_bin_shifted = max_sync_bin > FFT_LEN / 2 ? max_sync_bin - FFT_LEN : max_sync_bin;
+        int sync_bin_shifted = max_sync_bin - FFT_LEN / 2;
         float sync_cfo = sync_bin_shifted * cfo_step - cfo_low_tone;
 
         result->got_sync = true;
