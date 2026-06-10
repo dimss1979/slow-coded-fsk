@@ -89,7 +89,7 @@ static void demodulate(struct sym_phase *c)
     }
 
     for (int i = TONE_SPAN * FFT_RATIO; i < FFT_LEN - (TONE_SPAN * FFT_RATIO); i++) {
-        float power_sum = 0.0f;
+        float power_sum = FLT_MIN;
 
         for (int j = -TONE_SPAN; j < TONE_SPAN; j++) {
             int n = i + j * FFT_RATIO;

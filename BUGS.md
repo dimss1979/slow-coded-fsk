@@ -16,7 +16,11 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
   Fix: skip the second pass (and threshold check) when the first pass found
   `max_weight == 0`, or clamp `b0` to `cfo_bin_min`.
 
-- [ ] **2. NaN converted to `uint8_t` in `demodulate`** — `scf_rx.c:99`
+- [x] **2. NaN converted to `uint8_t` in `demodulate`** — `scf_rx.c:99`
+  *Fixed 2026-06-10: `power_sum` is seeded with `FLT_MIN` so the denominator is never
+  zero — branchless, keeps the loop vectorizable (an earlier `if (power_sum > 0)`
+  guard cost ~35% decode time and was reverted). Re-verified with UBSan
+  float-cast-overflow + float-divide-by-zero; decode time back at ~60 ms.*
   `c->demod_buf[demod_buf_idx][i] = WEIGHT_SCALE * power[i] / power_sum;` divides by
   zero when the spectrum is silent, producing NaN; converting NaN to an unsigned
   integer is UB. **Verified with UBSan** (`-fsanitize=float-cast-overflow`):
