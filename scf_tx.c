@@ -49,8 +49,13 @@ static void mod_filter_init(void)
 void scf_tx_init(float freq)
 {
     mod_filter_init();
+    memset(mod_filter_buf, 0, sizeof(mod_filter_buf));
+    mod_filter_idx = 0;
+    scf_filter_reset_tx();
 
     carrier_freq = freq;
+    carrier_phase = 0.0f;
+    baseband_phase = 0.0f;
 }
 
 void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain)

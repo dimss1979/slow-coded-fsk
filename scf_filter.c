@@ -72,6 +72,21 @@ void scf_filter_init(void)
     initialized = 1;
 }
 
+/* Safe to call before scf_filter_init: the buffers start zeroed there */
+void scf_filter_reset_rx(void)
+{
+    if (initialized) {
+        memset(fft_in_rx, 0, FIR_FFT_LEN * sizeof(fft_in_rx[0]));
+    }
+}
+
+void scf_filter_reset_tx(void)
+{
+    if (initialized) {
+        memset(fft_in_tx, 0, FIR_FFT_LEN * sizeof(fft_in_tx[0]));
+    }
+}
+
 void scf_filter_rx(complex float *out, complex float *in)
 {
     scf_filter_internal(out, in, fft_in_rx);

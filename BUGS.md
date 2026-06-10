@@ -74,7 +74,13 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
 
 ## Smaller issues
 
-- [ ] **8. Re-init doesn't reset state**
+- [x] **8. Re-init doesn't reset state**
+  *Fixed 2026-06-10: `scf_rx_init()` now also resets `carrier_phase`,
+  `demod_buf_idx`, `input_signal`, and the per-phase demod ring buffers;
+  `scf_tx_init()` resets `carrier_phase`, `baseband_phase`, and the modulation
+  filter buffer/index. Also added `scf_filter_reset_rx()`/`scf_filter_reset_tx()`
+  to clear the overlap-save history buffers in scf_filter.c, called from the
+  respective inits. Full suite at 0.58–0.61 reception probability, timing unchanged.*
   `scf_rx_init()` resets `symbol_counter`/`symbol_skip` but not `carrier_phase`,
   `demod_buf_idx`, `input_signal`, or the demod ring buffers; `scf_tx_init()`
   doesn't reset `baseband_phase`, `carrier_phase`, or the modulation filter state.

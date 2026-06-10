@@ -207,6 +207,13 @@ void scf_rx_init(float freq)
     symbol_counter = 0;
     symbol_skip = 0;
     carrier_freq = freq;
+    carrier_phase = 0.0f;
+    demod_buf_idx = 0;
+    memset(input_signal, 0, sizeof(input_signal));
+    for (size_t i = 0; i < SYM_PHASES; i++) {
+        memset(sym_phase[i].demod_buf, 0, sizeof(sym_phase[i].demod_buf));
+    }
+    scf_filter_reset_rx();
 
     if (!initialized) {
         for (size_t i = 0; i < SYM_PHASES; i++) {
