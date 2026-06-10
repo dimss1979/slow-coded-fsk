@@ -1,5 +1,5 @@
-#ifndef __SCF_H
-#define __SCF_H
+#ifndef SCF_H
+#define SCF_H
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -51,8 +52,10 @@ void dump_signal(char *filename, float *signal, size_t len)
     }
 
     for (size_t i = 0; i < len; i++) {
-        int rv = write(f, &signal[i], sizeof(signal[i]));
-        assert(rv > 0);
+        ssize_t rv = write(f, &signal[i], sizeof(signal[i]));
+        if (rv != sizeof(signal[i])) {
+            break;
+        }
     }
 
     close(f);
@@ -120,7 +123,7 @@ bool run_test(void)
 
     scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
     size_t signal_i = tx_rand_delay;
-    for (size_t i = 0; i < PKT_LEN; i++) {
+    for (size_t i = 0; i < pkt_len; i++) {
         scf_tx(&tx_signal[signal_i], tx_packet[i], (float) SCF_DEC_RATIO);
         signal_i += SCF_SYM_LEN;
     }
@@ -160,7 +163,7 @@ bool run_test(void)
         scf_rx(&result, &rx_signal[i]);
 
         if (result.got_sync) {
-            printf(" +++ Sync at %li weight %f cfo %f phase %li, packet type %li\n",
+            printf(" +++ Sync at %zu weight %f cfo %f phase %zu, packet type %zu\n",
                 result.symbol_counter, result.sync_weight, result.sync_cfo, result.sync_phase,
                 result.sync_packet_type
             );
@@ -168,7 +171,7 @@ bool run_test(void)
 
         if (result.got_msg) {
             if (result.msg_len != MSG_RAW_LEN) {
-                printf(" !!! Wrong message length %li\n", result.msg_len);
+                printf(" !!! Wrong message length %zu\n", result.msg_len);
                 wrong_len++;
                 continue;
             }
@@ -182,7 +185,7 @@ bool run_test(void)
     }
 
     uint64_t decoder_time = get_msec() - decoder_time_start;
-    printf("%s received in %lu msec\n\n", message_is_decoded ? "    " : " NOT", decoder_time);
+    printf("%s received in %" PRIu64 " msec\n\n", message_is_decoded ? "    " : " NOT", decoder_time);
 
     return message_is_decoded;
 }

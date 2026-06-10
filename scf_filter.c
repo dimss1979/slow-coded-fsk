@@ -6,7 +6,7 @@
 #include "scf_private.h"
 
 #define FIR_FFT_LEN 2048
-_Static_assert(SCF_SYM_LEN + SCF_FIR_LEN_RF - 1 <= FIR_FFT_LEN);
+_Static_assert(SCF_SYM_LEN + SCF_FIR_LEN_RF - 1 <= FIR_FFT_LEN, "Invalid FFT length");
 
 static const complex float bb_fir_rf_td[];
 
@@ -49,7 +49,7 @@ void scf_filter_init(void)
     fft_kernel_fd = fftwf_alloc_complex(FIR_FFT_LEN);
     fft_fd = fftwf_alloc_complex(FIR_FFT_LEN);
     fft_out = fftwf_alloc_complex(FIR_FFT_LEN);
-    assert(fft_in_rx && fft_in_tx && fft_out && fft_kernel_fd && fft_fd && fft_out);
+    assert(fft_in_rx && fft_in_tx && fft_kernel_fd && fft_fd && fft_out);
 
     fft = fftwf_plan_dft_1d(FIR_FFT_LEN, fft_in_rx, fft_fd, FFTW_FORWARD, FFTW_ESTIMATE);
     ifft = fftwf_plan_dft_1d(FIR_FFT_LEN, fft_fd, fft_out, FFTW_BACKWARD, FFTW_ESTIMATE);

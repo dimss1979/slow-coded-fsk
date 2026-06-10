@@ -1,5 +1,5 @@
-#ifndef __SCF_PRIVATE_H
-#define __SCF_PRIVATE_H
+#ifndef SCF_PRIVATE_H
+#define SCF_PRIVATE_H
 
 #include <complex.h>
 #include <stdbool.h>
