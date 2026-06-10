@@ -83,7 +83,7 @@ void scf_packet_init(uint64_t seed)
 
 size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len)
 {
-    size_t packet_type = -1;
+    size_t packet_type = SCF_PACKET_TYPES;
     size_t msg_fec_len = 0;
     void *rs_code = NULL;
     for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
@@ -94,7 +94,7 @@ size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len)
             break;
         }
     }
-    assert(packet_type >= 0);
+    assert(packet_type < SCF_PACKET_TYPES);
 
     uint8_t msg_fec[SCF_MSG_FEC_MAX];
     for (size_t i = 0; i < msg_len; i++) {

@@ -34,7 +34,10 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
   `scf.h`. Verified: external consumers including `scf.h` directly get
   `unknown type name 'bool'`. Fix: add `#include <stdbool.h>`.
 
-- [ ] **4. Always-true assert hides a NULL dereference** — `scf_packet.c:86-97`
+- [x] **4. Always-true assert hides a NULL dereference** — `scf_packet.c:86-97`
+  *Fixed 2026-06-10: `packet_type` initialized to `SCF_PACKET_TYPES` and asserted
+  `< SCF_PACKET_TYPES` (matching the decode-side assert). Verified the assert fires
+  for an unmatched msg_len; scf_test encode path unaffected.*
   `size_t packet_type = -1; ... assert(packet_type >= 0);` — `packet_type` is
   unsigned, the assert can never fire. If `msg_len` matches no packet type,
   `rs_code` stays NULL and `encode_rs_char(NULL, ...)` crashes; also
