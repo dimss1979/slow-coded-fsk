@@ -27,7 +27,8 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
   `-nan is outside the range of representable values of type 'unsigned char'`.
   Fix: guard against `power_sum == 0` (or add a tiny epsilon).
 
-- [ ] **3. `scf.h` does not compile standalone** — `scf.h:29`
+- [x] **3. `scf.h` does not compile standalone** — `scf.h:29`
+  *Fixed 2026-06-10: added `#include <stdbool.h>`; verified a TU including only scf.h compiles with `-Wall -Werror`.*
   The public header uses `bool` in `scf_rx_result` but never includes `<stdbool.h>`.
   It only builds in-repo because `scf_private.h` includes `<stdbool.h>` before
   `scf.h`. Verified: external consumers including `scf.h` directly get
