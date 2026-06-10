@@ -105,6 +105,7 @@ float measure_power(float *signal, size_t len)
 
 bool run_test(void)
 {
+    memset(tx_signal, 0, RX_SIGNAL_LEN * sizeof(tx_signal[0]));
     memset(noise, 0, RX_SIGNAL_LEN * sizeof(noise[0]));
 
     // TX

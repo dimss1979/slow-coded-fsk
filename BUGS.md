@@ -56,7 +56,10 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
   [2π, 4π) instead of near zero. Output stays correct only because sinf/cosf are
   periodic, but it defeats the purpose of wrapping and costs float precision.
 
-- [ ] **6. `tx_signal` never cleared between test iterations** — `scf_test.c:108`
+- [x] **6. `tx_signal` never cleared between test iterations** — `scf_test.c:108`
+  *Fixed 2026-06-10: `tx_signal` is now memset alongside `noise` at the top of
+  `run_test()`. Full run: 0.59 reception probability (vs 0.49/0.54 before — slight
+  improvement consistent with removing ghost-packet interference, though within ~2σ).*
   `run_test()` memsets `noise` but not `tx_signal`. Each test writes its packet at a
   random offset, so the previous iteration's packet remains at its old offset and is
   summed into `rx_signal` as ghost interference, skewing reception probability and
