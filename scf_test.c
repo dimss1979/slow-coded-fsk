@@ -174,7 +174,7 @@ bool run_test(void)
             }
             if (memcmp(result.msg, tx_message, MSG_RAW_LEN)) {
                 printf(" !!! Wrong message\n");
-                wrong_len++;
+                wrong_msg++;
                 continue;
             }
             message_is_decoded = true;

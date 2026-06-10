@@ -65,7 +65,10 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
   summed into `rx_signal` as ghost interference, skewing reception probability and
   SNR. Fix: `memset(tx_signal, 0, RX_SIGNAL_LEN * sizeof(float))`.
 
-- [ ] **7. `wrong_msg` counter never incremented** — `scf_test.c:176`
+- [x] **7. `wrong_msg` counter never incremented** — `scf_test.c:176`
+  *Fixed 2026-06-10: the "Wrong message" branch now increments `wrong_msg`.
+  (Both counters read 0 in a clean run; the counter only registers when RS
+  decode succeeds but the payload mismatches.)*
   The "Wrong message" branch increments `wrong_len` (copy-paste error), so the
   `Wrong message:` summary line always prints 0. Fix: `wrong_msg++`.
 
