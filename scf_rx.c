@@ -124,6 +124,10 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
         }
     }
 
+    if (!max_weight) {
+        return;
+    }
+
     max_weight = 0;
     memset(weight_per_bin, 0, sizeof(weight_per_bin));
     int b0 = max_bin - FFT_RATIO * 2;

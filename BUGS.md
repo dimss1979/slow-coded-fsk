@@ -5,7 +5,8 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
 
 ## Confirmed crashes / undefined behavior
 
-- [ ] **1. Stack buffer overflow in `find_sync` when no signal is present** — `scf_rx.c:129-134`
+- [x] **1. Stack buffer overflow in `find_sync` when no signal is present** — `scf_rx.c:129-134`
+  *Fixed 2026-06-10: early return from `find_sync` when the first pass finds zero weight; re-verified with ASan.*
   The second refinement pass computes `b0 = max_bin - FFT_RATIO * 2`. If the first
   pass found zero weight everywhere (all-zero demod ring buffer — silence, or the
   first symbols after startup), `max_bin` stays `0`, so `b0 = -8` and the loop
