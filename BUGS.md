@@ -46,7 +46,11 @@ confirmed at runtime with ASan/UBSan. Check off items as they get fixed.
 
 ## Logic bugs
 
-- [ ] **5. Inverted phase-wrap condition in the TX oscillator** — `scf_tx.c:70-72`
+- [x] **5. Inverted phase-wrap condition in the TX oscillator** — `scf_tx.c:70-72`
+  *Fixed 2026-06-10: condition changed to `< -2.0f * M_PI`. Behavior-neutral as
+  expected: full scf_test runs gave 0.49 reception probability before vs 0.54 after
+  (n=100, within noise; the suite runs at threshold SNR, ~0.5 is the normal
+  operating point).*
   `while (baseband_phase < 2.0f * M_PI) { baseband_phase += 2.0f * M_PI; }`
   should be `< -2.0f * M_PI`. As written, the two wrap loops force the phase into
   [2π, 4π) instead of near zero. Output stays correct only because sinf/cosf are

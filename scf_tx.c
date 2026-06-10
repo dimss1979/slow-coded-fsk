@@ -67,7 +67,7 @@ void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain)
         while (baseband_phase > 2.0f * M_PI) {
             baseband_phase -= 2.0f * M_PI;
         }
-        while (baseband_phase < 2.0f * M_PI) {
+        while (baseband_phase < -2.0f * M_PI) {
             baseband_phase += 2.0f * M_PI;
         }
     }
