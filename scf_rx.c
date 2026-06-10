@@ -147,14 +147,38 @@ static void find_sync(struct sym_phase *p, uint32_t *sync_vector, size_t packet_
     }
 }
 
-static uint8_t ml_decode(size_t *positions, size_t phase, size_t bin, size_t codeword_size, uint32_t *code_table)
+static void deinterleave(size_t positions[][SCF_FEC_LEN], size_t outer_codeword_len)
+{
+    size_t block_len = (SCF_FEC_LEN * outer_codeword_len) / SCF_SYNC_LEN;
+    size_t first_block_len = block_len + (SCF_FEC_LEN * outer_codeword_len) % SCF_SYNC_LEN;
+    size_t pos = (demod_buf_idx - (SCF_FEC_LEN * outer_codeword_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
+    size_t sync_cnt = first_block_len;
+    size_t data_cnt = 0;
+
+    while (pos != demod_buf_idx) {
+        if (sync_cnt) {
+            size_t inner_i = data_cnt / outer_codeword_len;
+            size_t outer_i = data_cnt % outer_codeword_len;
+
+            positions[outer_i][inner_i] = pos;
+            data_cnt++;
+            sync_cnt--;
+        } else {
+            sync_cnt = block_len;
+        }
+
+        pos = (pos + 1) % SCF_PKT_MAX;
+    }
+}
+
+static uint8_t max_likelyhood_decode(size_t *positions, size_t phase, size_t bin, uint32_t *code_table)
 {
     uint32_t max_weight = 0;
     uint8_t max_symbol = 0;
     for (size_t i = 0; i < 256; i++) {
         uint32_t weight = 0;
-        for (size_t s = 0; s < codeword_size; s++) {
-            size_t b = bin + FFT_RATIO * code_table[i * codeword_size + s];
+        for (size_t s = 0; s < SCF_FEC_LEN; s++) {
+            size_t b = bin + FFT_RATIO * code_table[i * SCF_FEC_LEN + s];
             weight += sym_phase[phase].demod_buf[positions[s]][b];
         }
 
@@ -239,7 +263,6 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
     }
 
     if (max_sync_weight > 0) {
-
         int sync_bin_shifted = max_sync_bin - FFT_LEN / 2;
         float sync_cfo = sync_bin_shifted * cfo_step - cfo_low_tone;
 
@@ -251,38 +274,16 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
 
         if (!symbol_skip) {
             size_t outer_codeword_len = scf_packet_fec_len[packet_type];
+            uint8_t outer_codeword[outer_codeword_len];
+            size_t deinterleaved_positions[outer_codeword_len][SCF_FEC_LEN];
 
-            size_t positions[SCF_MSG_FEC_MAX][SCF_FEC_LEN];
-
-            size_t block_len = (SCF_FEC_LEN * outer_codeword_len) / SCF_SYNC_LEN;
-            size_t first_block_len = block_len + (SCF_FEC_LEN * outer_codeword_len) % SCF_SYNC_LEN;
-            size_t pos = (demod_buf_idx - (SCF_FEC_LEN * outer_codeword_len + SCF_SYNC_LEN) + 1 + SCF_PKT_MAX) % SCF_PKT_MAX;
-            size_t sync_cnt = first_block_len;
-            size_t data_cnt = 0;
-
-            while (pos != demod_buf_idx) {
-                if (sync_cnt) {
-                    size_t inner_i = data_cnt / outer_codeword_len;
-                    size_t outer_i = data_cnt % outer_codeword_len;
-
-                    positions[outer_i][inner_i] = pos;
-                    data_cnt++;
-                    sync_cnt--;
-                } else {
-                    sync_cnt = block_len;
-                }
-
-                pos = (pos + 1) % SCF_PKT_MAX;
-            }
-
-            uint8_t outer_codeword[SCF_MSG_FEC_MAX];
+            deinterleave(deinterleaved_positions, outer_codeword_len);
 
             for (size_t i = 0; i < outer_codeword_len; i++) {
-                uint8_t byte_val = ml_decode(
-                    &positions[i][0],
+                uint8_t byte_val = max_likelyhood_decode(
+                    &deinterleaved_positions[i][0],
                     max_sync_phase,
                     max_sync_bin,
-                    SCF_FEC_LEN,
                     &scf_inner_code[0][0]
                 );
                 outer_codeword[i] = byte_val;
