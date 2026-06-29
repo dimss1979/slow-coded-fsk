@@ -46,17 +46,18 @@ typedef struct _scf_rx_result {
  * Also, call to change parameters:
  *  - seed for the random code and sync vector generation
  *  - carrier frequency
+ *  - TX gain
  */
 void scf_packet_init(uint64_t seed);
-void scf_tx_init(float freq);
+void scf_tx_init(float freq, float gain);
 void scf_rx_init(float freq);
 
-/* TX: encode a message into a packet of FSK symbol indices */
-size_t scf_packet_encode(uint32_t *packet, uint8_t *msg, size_t msg_len);
+/* TX: start message transmission */
+bool scf_tx_start(uint8_t *msg, size_t msg_len);
 
-/* TX: generate a passband FSK signal from an FSK symbol index */
+/* TX: generate a passband FSK signal of a single symbol length */
 /* Call repeatedly for each FSK symbol in the packet */
-void scf_tx(float signal[SCF_SYM_LEN], uint32_t symbol, float gain);
+bool scf_tx(float signal[SCF_SYM_LEN]);
 
 /* RX: decode a message from a passband FSK signal */
 /* The result structure is filled according to decoding outcome */

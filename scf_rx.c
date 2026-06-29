@@ -6,6 +6,7 @@
 #include <math.h>
 #include <float.h>
 #include <stdbool.h>
+#include <fec.h>
 #include "scf_private.h"
 
 #define SYM_PHASES 4
@@ -195,6 +196,31 @@ static uint8_t max_likelyhood_decode(size_t *positions, size_t phase, size_t bin
     return max_symbol;
 }
 
+static bool decode_packet(scf_rx_result *result, uint8_t *outer_codeword)
+{
+    size_t packet_type = result->sync_packet_type;
+    assert(packet_type < SCF_PACKET_TYPES);
+
+    size_t msg_len = scf_packet_user_len[packet_type];
+    int symbol_error_count = decode_rs_char(scf_packet_rs_code[packet_type], outer_codeword, NULL, 0);
+
+    if (symbol_error_count >= 0) {
+        for (size_t i = 0; i < msg_len; i++) {
+            outer_codeword[i] ^= scf_data_scrambler[i];
+        }
+
+        memcpy(result->msg, outer_codeword, msg_len);
+        result->msg_len = msg_len;
+        result->outer_fec_errors = symbol_error_count;
+        result->got_msg = true;
+
+        return true;
+    }
+
+    return false;
+}
+
+
 static void fft_window_init(void)
 {
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
@@ -300,7 +326,7 @@ void scf_rx(scf_rx_result *result, float signal[SCF_SYM_LEN])
                 outer_codeword[i] = byte_val;
             }
 
-            if (scf_packet_decode(result, outer_codeword)) {
+            if (decode_packet(result, outer_codeword)) {
                 symbol_skip = 5;
             }
         }

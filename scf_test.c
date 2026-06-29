@@ -111,22 +111,27 @@ bool run_test(void)
     memset(tx_signal, 0, RX_SIGNAL_LEN * sizeof(tx_signal[0]));
     memset(noise, 0, RX_SIGNAL_LEN * sizeof(noise[0]));
 
-    // TX
-
     scf_packet_init(gsl_rng_get(rng));
-    generate_message(tx_message);
-    size_t pkt_len = scf_packet_encode(tx_packet, tx_message, MSG_RAW_LEN);
-    assert(pkt_len == PKT_LEN);
+
+    // TX
 
     size_t tx_rand_delay = gsl_rng_uniform_int(rng, SCF_SYM_LEN) + START_OFFSET * SCF_SYM_LEN;
     float tx_rand_freq_offset = (gsl_rng_uniform(rng) - 0.5f) * 2.0f * 200.0f;
 
-    scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset);
+    scf_tx_init(CARRIER_FREQ + tx_rand_freq_offset, (float) SCF_DEC_RATIO);
+    generate_message(tx_message);
+    bool tx_started = scf_tx_start(tx_message, MSG_RAW_LEN);
+    assert(tx_started);
+
     size_t signal_i = tx_rand_delay;
-    for (size_t i = 0; i < pkt_len; i++) {
-        scf_tx(&tx_signal[signal_i], tx_packet[i], (float) SCF_DEC_RATIO);
+    for (size_t i = 0; i < PKT_LEN; i++) {
+        bool tx_ok = scf_tx(&tx_signal[signal_i]);
+        assert(tx_ok);
         signal_i += SCF_SYM_LEN;
     }
+    bool tx_ok = scf_tx(&tx_signal[0]);
+    assert(!tx_ok);
+
     //dump_signal("dump_tx_signal.raw", tx_signal, RX_SIGNAL_LEN);
     //exit(1);
 
