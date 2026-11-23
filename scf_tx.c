@@ -2,7 +2,6 @@
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
-#include <fec.h>
 #include "scf_private.h"
 
 #define MOD_FILTER_LEN (SCF_BB_SYM_LEN / 20)
@@ -71,12 +70,10 @@ bool scf_tx_start(uint8_t *msg, size_t msg_len)
 {
     size_t packet_type = SCF_PACKET_TYPES;
     size_t msg_fec_len = 0;
-    void *rs_code = NULL;
     for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
         if (scf_packet_user_len[i] == msg_len) {
             packet_type = i;
             msg_fec_len = scf_packet_fec_len[i];
-            rs_code = scf_packet_rs_code[i];
             break;
         }
     }
@@ -88,7 +85,8 @@ bool scf_tx_start(uint8_t *msg, size_t msg_len)
     for (size_t i = 0; i < msg_len; i++) {
         msg_fec[i] = msg[i] ^ scf_data_scrambler[i];
     }
-    encode_rs_char(rs_code, msg_fec, &msg_fec[msg_len]);
+    if (scf_rs_encode(msg_fec, msg_len, msg_fec_len - msg_len))
+        return false;
 
     size_t block_len = (SCF_FEC_LEN * msg_fec_len) / SCF_SYNC_LEN;
     size_t first_block_len = block_len + (SCF_FEC_LEN * msg_fec_len) % SCF_SYNC_LEN;

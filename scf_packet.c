@@ -1,13 +1,8 @@
-#include <assert.h>
-#include <fec.h>
 #include <stddef.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "scf_private.h"
-
-static bool rs_code_initialized = false;
 
 /* Packet type parameters.
  * Adjust these to match your needs.
@@ -24,7 +19,6 @@ size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
     129,
 };
 
-void *scf_packet_rs_code[SCF_PACKET_TYPES];
 uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_SYNC_LEN];
 uint32_t scf_inner_code[256][SCF_FEC_LEN];
 uint8_t scf_data_scrambler[SCF_MSG_FEC_MAX];
@@ -65,18 +59,4 @@ void scf_packet_init(uint64_t seed)
     for (size_t i = 0; i < SCF_MSG_FEC_MAX; i++) {
         scf_data_scrambler[i] = xorshift64(&xorshift64_state);
     }
-
-    if (rs_code_initialized)
-        return;
-
-    for (size_t i = 0; i < SCF_PACKET_TYPES; i++) {
-        scf_packet_rs_code[i] = init_rs_char(
-            8, 0x11d, 1, 1,
-            scf_packet_fec_len[i] - scf_packet_user_len[i],
-            255 - scf_packet_fec_len[i]
-        );
-        assert(scf_packet_rs_code[i]);
-    }
-
-    rs_code_initialized = true;
 }

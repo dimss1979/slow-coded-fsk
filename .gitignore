@@ -1,4 +1,5 @@
 *.o
 *.d
 scf_test
+scf_test_reed_solomon
 

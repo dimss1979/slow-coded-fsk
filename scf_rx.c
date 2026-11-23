@@ -6,7 +6,6 @@
 #include <math.h>
 #include <float.h>
 #include <stdbool.h>
-#include <fec.h>
 #include "scf_private.h"
 
 #define SYM_PHASES 4
@@ -202,7 +201,8 @@ static bool decode_packet(scf_rx_result *result, uint8_t *outer_codeword)
     assert(packet_type < SCF_PACKET_TYPES);
 
     size_t msg_len = scf_packet_user_len[packet_type];
-    int symbol_error_count = decode_rs_char(scf_packet_rs_code[packet_type], outer_codeword, NULL, 0);
+    size_t parity_len = scf_packet_fec_len[packet_type] - msg_len;
+    int symbol_error_count = scf_rs_decode(outer_codeword, msg_len, parity_len);
 
     if (symbol_error_count >= 0) {
         for (size_t i = 0; i < msg_len; i++) {
