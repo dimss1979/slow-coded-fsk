@@ -10,7 +10,6 @@
 static float carrier_freq;
 static float carrier_phase;
 static float baseband_phase;
-static float tx_gain;
 
 static float mod_filter_buf[MOD_FILTER_LEN];
 static float mod_filter_kernel[MOD_FILTER_LEN];
@@ -50,7 +49,7 @@ static void mod_filter_init(void)
     }
 }
 
-void scf_tx_init(float freq, float gain)
+void scf_tx_init(float freq)
 {
     mod_filter_init();
     memset(mod_filter_buf, 0, sizeof(mod_filter_buf));
@@ -60,7 +59,6 @@ void scf_tx_init(float freq, float gain)
     carrier_freq = freq;
     carrier_phase = 0.0f;
     baseband_phase = 0.0f;
-    tx_gain = gain;
 
     tx_packet_len = 0;
     tx_packet_pos = 0;
@@ -130,7 +128,7 @@ bool scf_tx(float signal[SCF_SYM_LEN])
     float freq = FREQ_STEP * ((float) symbol + 0.5f - (float) SCF_TONES / 2.0f);
 
     for (size_t i = 0; i < SCF_BB_SYM_LEN; i++) {
-        baseband[i * SCF_DEC_RATIO] = tx_gain * (complex float) (sinf(baseband_phase) + I * cosf(baseband_phase));
+        baseband[i * SCF_DEC_RATIO] = (complex float) (sinf(baseband_phase) + I * cosf(baseband_phase));
 
         baseband_phase += 2.0f * M_PI * mod_filter(freq) * (1.0f / SCF_BB_SRATE);
         while (baseband_phase > 2.0f * M_PI) {
@@ -149,7 +147,12 @@ bool scf_tx(float signal[SCF_SYM_LEN])
             carrier_phase -= 2.0f * M_PI;
         }
 
-        complex float bb = baseband_filtered[i];
+        /* Zero-stuffed interpolation by SCF_DEC_RATIO through a
+         * unity-gain filter attenuates the envelope by
+         * 1/SCF_DEC_RATIO; compensate so the passband envelope is
+         * 1.0 (constant-envelope -3 dB RMS output).
+         */
+        complex float bb = baseband_filtered[i] * (float) SCF_DEC_RATIO;
         signal[i] = crealf(bb) * sinf(carrier_phase) - cimagf(bb) * cosf(carrier_phase);
     }
 

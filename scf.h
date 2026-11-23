@@ -46,10 +46,13 @@ typedef struct _scf_rx_result {
  * Also, call to change parameters:
  *  - seed for the random code and sync vector generation
  *  - carrier frequency
- *  - TX gain
+ *
+ * The TX output level is fixed: the baseband envelope has amplitude 1.0
+ * and the passband output is scaled after interpolation to a full-scale
+ * envelope, i.e. -3 dB RMS.
  */
 void scf_packet_init(uint64_t seed);
-void scf_tx_init(float freq, float gain);
+void scf_tx_init(float freq);
 void scf_rx_init(float freq);
 
 /* TX: start message transmission */
