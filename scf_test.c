@@ -15,8 +15,8 @@
 
 #include "scf.h"
 
-#define MSG_RAW_LEN 107 /* bytes */
-#define MSG_FEC_LEN 129 /* bytes */
+#define MSG_RAW_LEN 108 /* bytes */
+#define MSG_FEC_LEN 130 /* bytes */
 #define START_OFFSET 20 /* symbols */
 #define CARRIER_FREQ 1900.0f /* Hz*/
 

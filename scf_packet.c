@@ -10,13 +10,13 @@
 
 /* User message length 1..253 bytes */
 size_t scf_packet_user_len[SCF_PACKET_TYPES] = {
-    7,
-    107,
+    8,
+    108,
 };
 /* Reed-Solomon outer codeword length 3..255 bytes */
 size_t scf_packet_fec_len[SCF_PACKET_TYPES] = {
-    15,
-    129,
+    16,
+    130,
 };
 
 uint32_t scf_packet_sync_vector[SCF_PACKET_TYPES][SCF_SYNC_LEN];

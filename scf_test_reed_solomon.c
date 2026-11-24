@@ -32,10 +32,10 @@ struct rs_params {
  * used by SCF and both ends of the supported range */
 static const struct rs_params params[] = {
     {1, 2},    /* Smallest correctable code */
-    {7, 8},    /* SCF short packet */
+    {8, 8},    /* SCF short packet */
     {20, 12},
     {50, 3},   /* Odd number of parity symbols */
-    {107, 22}, /* SCF long packet */
+    {108, 22}, /* SCF long packet */
     {100, 100},
     {128, 127},
     {253, 2},  /* Longest message */
