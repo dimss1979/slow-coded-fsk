@@ -2,4 +2,6 @@
 *.d
 scf_test
 scf_test_reed_solomon
+scf_alsa
+scf_test_alsa
 
