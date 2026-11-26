@@ -36,12 +36,12 @@ typedef struct {
     size_t len;
 } packet_t;
 
+/* Only accessed from pty_thread(), so no locking is needed. */
 typedef struct {
     packet_t packets[PACKET_QUEUE_LEN];
     size_t head;
     size_t tail;
     size_t count;
-    pthread_mutex_t mutex;
 } packet_queue_t;
 
 typedef struct {
@@ -93,41 +93,32 @@ static void usage(FILE *out, const char *prog)
 static void packet_queue_init(packet_queue_t *q)
 {
     memset(q, 0, sizeof(*q));
-    pthread_mutex_init(&q->mutex, NULL);
 }
 
 static bool packet_queue_push(packet_queue_t *q, const uint8_t *data, size_t len)
 {
     packet_t *p;
 
-    pthread_mutex_lock(&q->mutex);
-    if (q->count == PACKET_QUEUE_LEN) {
-        pthread_mutex_unlock(&q->mutex);
+    if (q->count == PACKET_QUEUE_LEN)
         return false;
-    }
 
     p = &q->packets[q->tail];
     memcpy(p->data, data, len);
     p->len = len;
     q->tail = (q->tail + 1) % PACKET_QUEUE_LEN;
     q->count++;
-    pthread_mutex_unlock(&q->mutex);
 
     return true;
 }
 
 static bool packet_queue_pop(packet_queue_t *q, packet_t *p)
 {
-    pthread_mutex_lock(&q->mutex);
-    if (q->count == 0) {
-        pthread_mutex_unlock(&q->mutex);
+    if (q->count == 0)
         return false;
-    }
 
     *p = q->packets[q->head];
     q->head = (q->head + 1) % PACKET_QUEUE_LEN;
     q->count--;
-    pthread_mutex_unlock(&q->mutex);
 
     return true;
 }
@@ -418,12 +409,11 @@ static void *pty_thread(void *arg)
                             continue;
                         }
 
-                        while (!packet_queue_push(&a->queue, decoded, decoded_len)) {
-                            poll(NULL, 0, 50);
-                            if (stop_requested)
-                                break;
-                        }
-                        fprintf(stderr, "PTY: queued %zu byte packet\n", decoded_len);
+                        if (packet_queue_push(&a->queue, decoded, decoded_len))
+                            fprintf(stderr, "PTY: queued %zu byte packet\n", decoded_len);
+                        else
+                            fprintf(stderr, "PTY: queue full, dropped %zu byte packet\n",
+                                    decoded_len);
                     } else if (r < 0) {
                         fprintf(stderr, "PTY: malformed frame, discarded\n");
                     }
