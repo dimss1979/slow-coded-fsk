@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <pty.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -52,6 +53,9 @@ typedef struct {
     snd_pcm_t *capture;
     snd_pcm_t *playback;
     packet_queue_t queue;
+    bool full_duplex;
+    /* Set by pty_thread(), read by capture_thread(). */
+    atomic_bool tx_active;
 } app_t;
 
 static app_t app;
@@ -91,6 +95,7 @@ static void usage(FILE *out, const char *prog)
     fprintf(out, "  -s SEED     SCF code seed, must match the other end (default: %llu)\n",
             DEFAULT_SEED);
     fprintf(out, "  -l PATH     PTY symlink path (default: %s)\n", DEFAULT_SYMLINK);
+    fprintf(out, "  -x          enable full duplex (default: half duplex)\n");
     fprintf(out, "  -h          show this help\n");
 }
 
@@ -361,6 +366,10 @@ static void *capture_thread(void *arg)
         if (pcm_read_full(a->capture, signal, SCF_SYM_LEN) < 0)
             break;
 
+        /* In half duplex the receiver must not see our own transmission. */
+        if (!a->full_duplex && atomic_load(&a->tx_active))
+            memset(signal, 0, sizeof(signal));
+
         scf_rx(&result, signal);
         if (result.got_msg) {
             uint8_t frame[SCF_COBS_FRAME_MAX];
@@ -386,7 +395,6 @@ static void *pty_thread(void *arg)
     scf_cobs_rx rx;
     float signal[SCF_SYM_LEN];
     packet_t current;
-    bool active = false;
 
     scf_cobs_rx_reset(&rx);
     memset(signal, 0, sizeof(signal));
@@ -425,22 +433,22 @@ static void *pty_thread(void *arg)
             break;
         }
 
-        if (!active) {
+        if (!atomic_load(&a->tx_active)) {
             if (packet_queue_pop(&a->queue, &current)) {
                 if (!scf_tx_start(current.data, current.len)) {
                     fprintf(stderr, "TX: cannot start %zu byte packet\n", current.len);
                 } else {
                     fprintf(stderr, "TX: sending %zu byte packet\n", current.len);
-                    active = true;
+                    atomic_store(&a->tx_active, true);
                 }
             } else {
                 memset(signal, 0, sizeof(signal));
             }
         }
 
-        if (active) {
+        if (atomic_load(&a->tx_active)) {
             if (!scf_tx(signal)) {
-                active = false;
+                atomic_store(&a->tx_active, false);
                 memset(signal, 0, sizeof(signal));
             }
         }
@@ -465,7 +473,7 @@ int main(int argc, char **argv)
     bool pty_started = false;
     int opt;
 
-    while ((opt = getopt(argc, argv, "d:C:P:f:s:l:h")) != -1) {
+    while ((opt = getopt(argc, argv, "d:C:P:f:s:l:hx")) != -1) {
         char *end;
 
         switch (opt) {
@@ -495,6 +503,9 @@ int main(int argc, char **argv)
             break;
         case 'l':
             symlink = optarg;
+            break;
+        case 'x':
+            app.full_duplex = true;
             break;
         case 'h':
             usage(stdout, argv[0]);
@@ -531,6 +542,7 @@ int main(int argc, char **argv)
     }
 
     packet_queue_init(&app.queue);
+    atomic_init(&app.tx_active, false);
 
     if (pthread_create(&capture_tid, NULL, capture_thread, &app) != 0) {
         fprintf(stderr, "Cannot start capture thread\n");
