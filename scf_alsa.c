@@ -1,5 +1,9 @@
 /* Bridge between SCF audio packets on ALSA and asft-compatible COBS frames
  * on a pseudo-terminal.
+ *
+ * The bridge is packet length agnostic: it forwards every decoded frame and
+ * every decoded SCF message as-is, without validating their length or
+ * contents. The upper layer owns packet validation.
  */
 
 #include <errno.h>
@@ -358,7 +362,7 @@ static void *capture_thread(void *arg)
             break;
 
         scf_rx(&result, signal);
-        if (result.got_msg && (result.msg_len == 8 || result.msg_len == 108)) {
+        if (result.got_msg) {
             uint8_t frame[SCF_COBS_FRAME_MAX];
             size_t frame_len = scf_cobs_frame(result.msg, result.msg_len, frame);
 
@@ -403,12 +407,6 @@ static void *pty_thread(void *arg)
                     int r = scf_cobs_rx_push(&rx, buf[i], decoded,
                                              sizeof(decoded), &decoded_len);
                     if (r == 1) {
-                        if (decoded_len != 8 && decoded_len != 108) {
-                            fprintf(stderr, "PTY: ignoring %zu byte frame\n",
-                                    decoded_len);
-                            continue;
-                        }
-
                         if (packet_queue_push(&a->queue, decoded, decoded_len))
                             fprintf(stderr, "PTY: queued %zu byte packet\n", decoded_len);
                         else

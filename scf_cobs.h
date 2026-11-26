@@ -4,9 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "scf.h"
+
 /* Wire format shared with asft: 0x00 | COBS(packet) | 0x00 */
 #define SCF_COBS_DELIMITER 0x00
-#define SCF_COBS_PKT_MAX 108
+#define SCF_COBS_PKT_MAX SCF_MSG_FEC_MAX
 #define SCF_COBS_BODY_MAX (SCF_COBS_PKT_MAX + SCF_COBS_PKT_MAX / 254 + 1)
 #define SCF_COBS_FRAME_MAX (SCF_COBS_BODY_MAX + 2)
 
